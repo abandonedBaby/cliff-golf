@@ -5,21 +5,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cliff Golf — Vertical Mini Golf</title>
 <style>
-  html,body{margin:0;height:100%;background:#0b1020;color:#e8eefc;
-    font-family:ui-monospace,Menlo,Consolas,monospace;overflow:hidden}
-  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
-  canvas{background:#7ec0ee;image-rendering:pixelated;
-    box-shadow:0 0 0 3px #0b1020,0 12px 40px #000a;border-radius:4px;touch-action:none}
-  #hint{position:fixed;bottom:8px;left:0;right:0;text-align:center;
-    font-size:12px;color:#8fa3c8;pointer-events:none}
+  html,body{margin:0;padding:0;height:100%;background:#0b1020;color:#e8eefc;
+    font-family:ui-monospace,Menlo,Consolas,monospace;overflow:hidden;
+    overscroll-behavior:none;-webkit-user-select:none;user-select:none}
+  /* canvas is the whole viewport — no letterboxing on any device */
+  canvas{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none}
+  #hint{position:fixed;bottom:max(8px,env(safe-area-inset-bottom));left:0;right:0;
+    text-align:center;font-size:12px;color:#9fb2d4;pointer-events:none;
+    text-shadow:0 1px 3px #000a;padding:0 8px}
+  @media (max-width:560px){ #hint{font-size:10px} }
 </style>
 </head>
 <body>
-<div id="wrap"><canvas id="c" width="480" height="720"></canvas></div>
+<canvas id="c"></canvas>
 <div id="hint">drag DOWN from the ball to aim &amp; power up — release to launch · mouse wheel to peek · R = reset shot · mind the birds &amp; wind</div>
 <script>
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const VW = 480, VH = 720;
+// VW is the fixed width of the play column in world units — level design depends on
+// it, so it never changes. Everything else is derived from the actual viewport:
+//   VH  = how much world height fits on this screen
+//   VX0 = leftmost visible world x (negative when the screen is wider than the column)
+//   VWF = total visible world width, backdrop and HUD span this so nothing is letterboxed
+const VW = 480;
+let VH = 720, VX0 = 0, VWF = 480, SCALE = 1;
 // WH runs well below the floor so the camera can always scroll far enough past the
 // tee to leave a full pull-length of screen under the ball
 const WW = 480, WH = 4720;          // world size
@@ -266,9 +274,11 @@ function drawBirds(){
 
 // -------------------------------------------------------------------- state
 let ball, hole, strokes, total, cam, camPeek, aiming, aimFrom, mouse, done, msg, msgT;
+let restartArm = 0;                  // declared here: reset() runs before the input section
 
 function reset(){
   hole = 0; strokes = 0; total = 0; done = false; camPeek = 0; msg=''; msgT=0;
+  restartArm = 0; aiming = false;
   resetBirds();
   respawn(TEE.x, TEE.y);
   cam = ball.y - VH*0.65;
@@ -283,13 +293,34 @@ reset();
 function toWorld(e){
   const r = cv.getBoundingClientRect();
   const p = e.touches ? e.touches[0] : e;
-  // clamped to the canvas so a drag that runs past the screen edge still reads cleanly
-  const x = Math.max(-60, Math.min(VW+60, (p.clientX-r.left)*(VW/r.width)));
-  const y = Math.max(0, Math.min(VH, (p.clientY-r.top)*(VH/r.height)));
-  return { x, y: y+cam };
+  // clamped to the visible area so a drag that runs past the screen edge still reads cleanly
+  const s = toScreen(e);
+  return { x: Math.max(VX0, Math.min(VX0+VWF, s.x)),
+           y: Math.max(0, Math.min(VH, s.y)) + cam };
+}
+// screen space: world units, but without the camera offset (what the HUD is drawn in)
+function toScreen(e){
+  const r = cv.getBoundingClientRect();
+  const p = e.touches && e.touches[0] ? e.touches[0]
+          : (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0] : e);
+  return { x: VX0 + (p.clientX-r.left)/SCALE, y: (p.clientY-r.top)/SCALE };
+}
+// Restart button, top-right of the HUD bar. Needs a second tap to confirm so a
+// misplaced touch can never wipe a run in progress.
+function btnRect(){ return {x: VX0+VWF-40, y: 4, w: 34, h: 26}; }
+function inBtn(s){
+  const b = btnRect();
+  return s.x > b.x-6 && s.x < b.x+b.w+6 && s.y > b.y-4 && s.y < b.y+b.h+6;
 }
 function down(e){
   e.preventDefault();
+  const s = toScreen(e);
+  if(inBtn(s)){
+    if(restartArm > 0){ restartArm = 0; reset(); flash('RESTARTED'); }
+    else { restartArm = 180; flash('TAP AGAIN TO RESTART'); }
+    return;
+  }
+  restartArm = 0;                                  // tapping elsewhere cancels
   if(done) { reset(); return; }
   const m = toWorld(e);
   if(!atRest()) return;
@@ -499,12 +530,12 @@ function ridge(depth, col, amp, step, seed){
   for(let k=-1;k<=1;k++){
     const y0 = base + k*P;
     if(y0 > VH+260 || y0 < -320) continue;
-    ctx.beginPath(); ctx.moveTo(-10, y0+300);
-    for(let x=-10;x<=VW+10;x+=step){
+    ctx.beginPath(); ctx.moveTo(VX0-10, y0+300);
+    for(let x=VX0-10;x<=VX0+VWF+10;x+=step){
       const h = hsh(x*0.021+seed)*amp + hsh(x*0.083+seed)*amp*0.45;
       ctx.lineTo(x, y0 - h);
     }
-    ctx.lineTo(VW+10, y0+300); ctx.closePath(); ctx.fill();
+    ctx.lineTo(VX0+VWF+10, y0+300); ctx.closePath(); ctx.fill();
   }
 }
 
@@ -514,18 +545,25 @@ function sky(){
   gr.addColorStop(0,   mix('#0a1338','#6fb7e8', t));
   gr.addColorStop(0.55,mix('#1c3068','#9ed6f5', t));
   gr.addColorStop(1,   mix('#3b5fa8','#d8f0ff', t));
-  ctx.fillStyle = gr; ctx.fillRect(0,0,VW,VH);
+  ctx.fillStyle = gr; ctx.fillRect(VX0,0,VWF,VH);
   // stars near the top of the map
   if(cam < 1100){
     const a = 1-cam/1100;
     for(let i=0;i<90;i++){
-      const sx = (i*97)%VW, sy = (i*173)%1100 - cam;
+      const sx = VX0 + (i*97)%VWF, sy = (i*173)%1100 - cam;
       if(sy>0&&sy<VH){
         const tw = 0.5+0.5*Math.sin(perf/420+i);
         ctx.fillStyle = 'rgba(255,255,255,'+(a*tw*0.9).toFixed(2)+')';
         ctx.fillRect(sx, sy, i%7?1:2, i%7?1:2);
       }
     }
+  }
+  // bedrock bleed — keeps the horizon solid out to the screen edges on wide displays
+  const fy = 4360-cam;
+  if(fy < VH){
+    const top = Math.max(0, fy);
+    ctx.fillStyle = '#33200f'; ctx.fillRect(VX0, top, VWF, VH-top);
+    if(fy >= 0){ ctx.fillStyle = '#24701f'; ctx.fillRect(VX0, fy, VWF, 7); }
   }
   // parallax mountains
   ridge(0.22, 'rgba(96,132,180,.40)', 150, 16, 3.1);
@@ -535,7 +573,7 @@ function sky(){
     const dep = L?0.72:0.5, sz = L?1:0.7;
     ctx.fillStyle = 'rgba(255,255,255,'+(L?0.55:0.32)+')';
     for(let i=0;i<22;i++){
-      const cxp = ((i*211 + perf*(L?0.006:0.003))%(VW+140))-70;
+      const cxp = VX0 + ((i*211 + perf*(L?0.006:0.003))%(VWF+140))-70;
       const cyp = (i*337)%WH - cam*dep - (L?0:200);
       if(cyp>-40&&cyp<VH+40){
         ctx.beginPath();
@@ -917,31 +955,44 @@ function drawAim(){
     }
   }
   // power meter
-  ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(14, VH-42, 160, 12);
+  ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(VX0+14, VH-42, 160, 12);
   ctx.fillStyle = p>0.85 ? '#ff5b4a' : p>0.5 ? '#ffd23f' : '#66e06a';
-  ctx.fillRect(16, VH-40, 156*p, 8);
+  ctx.fillRect(VX0+16, VH-40, 156*p, 8);
 }
 
 function hud(){
+  const L = VX0, Rt = VX0+VWF, C = VX0+VWF/2;
   ctx.fillStyle = 'rgba(8,14,32,.72)';
-  ctx.fillRect(0,0,VW,32);
+  ctx.fillRect(L,0,VWF,32);
   ctx.fillStyle = '#e8eefc'; ctx.font = 'bold 14px ui-monospace,monospace';
   ctx.textAlign = 'left';
-  ctx.fillText('HOLE ' + Math.min(hole+1,HOLES.length) + '/' + HOLES.length, 12, 21);
-  ctx.fillText('STROKES ' + strokes, 130, 21);
+  ctx.fillText('HOLE ' + Math.min(hole+1,HOLES.length) + '/' + HOLES.length, L+12, 21);
+  ctx.fillText('STROKES ' + strokes, L+130, 21);
   ctx.textAlign = 'right';
-  ctx.fillText('TOTAL ' + total, VW-12, 21);
+  ctx.fillText('TOTAL ' + total, Rt-52, 21);
+  // restart button
+  const b = btnRect(), armed = restartArm > 0;
+  ctx.fillStyle = armed ? 'rgba(255,90,70,.92)' : 'rgba(255,255,255,.12)';
+  ctx.beginPath(); ctx.arc(b.x+b.w/2, b.y+b.h/2, 13, 0, 7); ctx.fill();
+  ctx.strokeStyle = armed ? '#fff' : '#cfe0ff';
+  ctx.lineWidth = 2; ctx.lineCap = 'round';
+  const cx = b.x+b.w/2, cy = b.y+b.h/2;
+  ctx.beginPath(); ctx.arc(cx, cy, 7, 0.6, 5.4); ctx.stroke();
+  ctx.beginPath();                                  // arrowhead on the circular arrow
+  ctx.moveTo(cx+3.5, cy-8.5); ctx.lineTo(cx+7.5, cy-5.5); ctx.lineTo(cx+2.5, cy-3);
+  ctx.stroke();
+  if(armed) restartArm--;
   // wind readout — live wind on a ball in flight, strongest on the aimed line
   const wnd = aiming ? aimWind : (ball.rest ? 0 : windAt(ball.x, ball.y));
   if(wnd !== 0){
     const dir = wnd > 0 ? 1 : -1, bars = Math.min(4, Math.round(Math.abs(wnd)/0.035));
-    ctx.fillStyle = 'rgba(8,14,32,.72)'; ctx.fillRect(VW/2-58, 34, 116, 20);
+    ctx.fillStyle = 'rgba(8,14,32,.72)'; ctx.fillRect(C-58, 34, 116, 20);
     ctx.fillStyle = '#9fd8ff'; ctx.font = 'bold 12px ui-monospace,monospace';
-    ctx.textAlign = 'left'; ctx.fillText('WIND', VW/2-50, 48);
+    ctx.textAlign = 'left'; ctx.fillText('WIND', C-50, 48);
     ctx.strokeStyle = Math.abs(wnd) > 0.1 ? '#ff9d4a' : '#9fd8ff';
     ctx.lineWidth = 2; ctx.lineCap = 'round';
     for(let i=0;i<bars;i++){
-      const ax = VW/2-8 + i*13, hx = dir > 0 ? ax+9 : ax;
+      const ax = C-8 + i*13, hx = dir > 0 ? ax+9 : ax;
       ctx.beginPath(); ctx.moveTo(ax, 44); ctx.lineTo(ax+9, 44);
       ctx.moveTo(hx-dir*4, 41); ctx.lineTo(hx, 44); ctx.lineTo(hx-dir*4, 47);
       ctx.stroke();
@@ -949,40 +1000,42 @@ function hud(){
     ctx.textAlign = 'left';
   }
   // altitude bar
-  ctx.fillStyle = 'rgba(255,255,255,.2)'; ctx.fillRect(VW-6, 40, 3, VH-90);
+  ctx.fillStyle = 'rgba(255,255,255,.2)'; ctx.fillRect(Rt-6, 40, 3, VH-90);
   const f = 1 - (ball.y/WH);
   ctx.fillStyle = '#ffd23f';
-  ctx.fillRect(VW-8, 40 + (1-f)*(VH-90) - 3, 7, 6);
+  ctx.fillRect(Rt-8, 40 + (1-f)*(VH-90) - 3, 7, 6);
 
   if(msgT > 0){
     ctx.textAlign = 'center';
     ctx.globalAlpha = Math.min(1, msgT/40);
     ctx.font = 'bold 22px ui-monospace,monospace';
-    ctx.fillStyle = '#000'; ctx.fillText(msg, VW/2+2, 120);
-    ctx.fillStyle = '#ffd23f'; ctx.fillText(msg, VW/2, 118);
+    ctx.fillStyle = '#000'; ctx.fillText(msg, C+2, 120);
+    ctx.fillStyle = '#ffd23f'; ctx.fillText(msg, C, 118);
     ctx.globalAlpha = 1; msgT--;
   }
   if(done){
-    ctx.fillStyle = 'rgba(5,8,20,.82)'; ctx.fillRect(0,0,VW,VH);
+    ctx.fillStyle = 'rgba(5,8,20,.82)'; ctx.fillRect(VX0,0,VWF,VH);
     ctx.textAlign = 'center'; ctx.fillStyle = '#ffd23f';
     ctx.font = 'bold 30px ui-monospace,monospace';
-    ctx.fillText('SUMMIT REACHED', VW/2, VH/2-30);
+    ctx.fillText('SUMMIT REACHED', C, VH/2-30);
     ctx.fillStyle = '#e8eefc'; ctx.font = 'bold 18px ui-monospace,monospace';
-    ctx.fillText('Total strokes: ' + total, VW/2, VH/2+6);
+    ctx.fillText('Total strokes: ' + total, C, VH/2+6);
     ctx.font = '14px ui-monospace,monospace';
-    ctx.fillText('click to play again', VW/2, VH/2+40);
+    ctx.fillText('click to play again', C, VH/2+40);
   }
   ctx.textAlign = 'left';
 }
 
 let vig = null;
 function vignette(){
+  const C = VX0+VWF/2;
   if(!vig){
-    vig = ctx.createRadialGradient(VW/2, VH/2, VH*0.34, VW/2, VH/2, VH*0.78);
+    const rad = Math.max(VH, VWF);
+    vig = ctx.createRadialGradient(C, VH/2, rad*0.34, C, VH/2, rad*0.78);
     vig.addColorStop(0, 'rgba(0,0,0,0)');
     vig.addColorStop(1, 'rgba(0,0,0,.28)');
   }
-  ctx.fillStyle = vig; ctx.fillRect(0,0,VW,VH);
+  ctx.fillStyle = vig; ctx.fillRect(VX0,0,VWF,VH);
 }
 
 let perf = 0;
@@ -998,12 +1051,32 @@ function loop(t){
 }
 requestAnimationFrame(loop);
 
-// fit canvas to window height
+// Fill the viewport edge to edge on any device. The play column keeps its fixed
+// 480-unit width; the screen decides how much world height comes with it. On screens
+// too wide for that (landscape desktop) the column is centred and the backdrop bleeds
+// out to both edges, so there are never bars.
+const MIN_VH = 620;                  // never show less world height than this
 function fit(){
-  const s = Math.min(window.innerWidth/VW, window.innerHeight/VH) * 0.96;
-  cv.style.width = (VW*s)+'px'; cv.style.height = (VH*s)+'px';
+  const cw = window.innerWidth, ch = window.innerHeight;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width  = Math.round(cw*dpr);
+  cv.height = Math.round(ch*dpr);
+
+  SCALE = cw/VW;                     // first choice: column spans the full width
+  if(ch/SCALE < MIN_VH) SCALE = ch/MIN_VH;   // too wide — fit height instead
+
+  VH  = ch/SCALE;
+  VWF = cw/SCALE;
+  VX0 = (VW - VWF)/2;                // <=0; negative means sky either side of the column
+
+  ctx.setTransform(SCALE*dpr, 0, 0, SCALE*dpr, -VX0*SCALE*dpr, 0);
+  ctx.imageSmoothingEnabled = true;
+  vig = null;                        // cached gradient depends on viewport size
+  if(typeof cam === 'number') cam = Math.max(-40, Math.min(WH-VH, cam));
 }
-window.addEventListener('resize', fit); fit();
+window.addEventListener('resize', fit);
+window.addEventListener('orientationchange', fit);
+fit();
 </script>
 </body>
 </html>
