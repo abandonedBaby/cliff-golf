@@ -16,7 +16,7 @@
 </head>
 <body>
 <div id="wrap"><canvas id="c" width="480" height="720"></canvas></div>
-<div id="hint">drag DOWN from the ball to aim &amp; power up — release to launch · mouse wheel to peek · R = reset shot · mind the birds</div>
+<div id="hint">drag DOWN from the ball to aim &amp; power up — release to launch · mouse wheel to peek · R = reset shot · mind the birds &amp; wind</div>
 <script>
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const VW = 480, VH = 720;
@@ -142,6 +142,27 @@ const HOLES = [
 ];
 
 const TEE = {x: 60, y: 4360 - R};
+
+// -------------------------------------------------------------------- wind
+// Bands of moving air sitting in the gaps between tiers. They push the ball
+// sideways while it is in flight only — a resting ball is never moved. Strength
+// climbs as you get higher, and directions alternate so you must read each gap.
+const WINDS = [
+  {x:  0, y:3380, w:480, h:120, ax: 0.05},
+  {x:  0, y:2920, w:480, h:140, ax:-0.06},
+  {x:150, y:2470, w:330, h:150, ax: 0.08},
+  {x:  0, y:2030, w:320, h:150, ax:-0.09},
+  {x:  0, y:1590, w:480, h:150, ax: 0.10},
+  {x:120, y:1140, w:360, h:150, ax:-0.11},
+  {x:  0, y: 680, w:480, h:160, ax: 0.12},
+  {x:  0, y: 260, w:480, h:140, ax:-0.13},
+];
+function windAt(x,y){
+  let ax = 0;
+  for(const w of WINDS)
+    if(x > w.x && x < w.x+w.w && y > w.y && y < w.y+w.h) ax += w.ax;
+  return ax;
+}
 
 // -------------------------------------------------------------------- birds
 // patrol the open air between ledges — clip one mid-flight and your shot is done for
@@ -307,6 +328,7 @@ function step(){
   if(ball.rest){ tugCam(); return; }
 
   ball.vy += GRAV;
+  ball.vx += windAt(ball.x, ball.y);
   ball.vx *= AIRDRAG; ball.vy *= AIRDRAG;
 
   // substep for tunnelling
@@ -315,8 +337,10 @@ function step(){
     ball.x += ball.vx/n; ball.y += ball.vy/n;
     collide();
     hitBirds();
-    if(done) return;
+    fellBack();
+    if(done || ball.rest) return;
   }
+  edgeGrip();
   ball.spin += ball.vx*0.06;
 
   // settle — the slow-frame counter is a backstop so a ball nudging along a slope
@@ -380,6 +404,27 @@ function collide(){
   }
 }
 
+// Ledge rims grab at a ball that is trickling toward the drop: a little extra drag
+// plus a gentle inward nudge, scaled by how close to the lip it is. Only bites below
+// GRIP_SPD, so a well struck ball still sails off the edge as before.
+const GRIP_W = 16, GRIP_PULL = 0.10, GRIP_SPD = 3.2;
+function edgeGrip(){
+  if(ball.rest) return;
+  if(Math.hypot(ball.vx, ball.vy) > GRIP_SPD) return;
+  for(const b of B){
+    if(b.wall || b.base || b.t==='w' || b.t==='r' || b.w < 24) continue;
+    if(Math.abs((ball.y+R) - b.y) > 3) continue;          // must be riding its top
+    if(ball.x < b.x-R || ball.x > b.x+b.w+R) continue;
+    const dL = ball.x - b.x, dR = (b.x+b.w) - ball.x;
+    const d  = Math.min(dL, dR);
+    if(d > GRIP_W) return;                                 // safely inboard
+    const t = Math.min(1, (GRIP_W-d)/GRIP_W);              // 0 inboard → 1 at the lip
+    ball.vx *= (1 - 0.06*t);
+    ball.vx += (dL < dR ? 1 : -1) * GRIP_PULL * t;
+    return;
+  }
+}
+
 // slope: treat the ramp face as a clipped half-space and bounce off its normal
 function rampCollide(b){
   if(ball.x < b.x-R || ball.x > b.x+b.w+R) return;
@@ -400,6 +445,20 @@ function rampCollide(b){
 
 function splash(){
   flash('SPLASH! +1 stroke');
+  strokes++; total++;
+  respawn(ball.homeX, ball.homeY);
+  ball.rest = true;
+}
+
+// Drop below the tier you already reached and you are set back where you were,
+// rather than tumbling all the way down the mountain.
+function fellBack(){
+  const last = HOLES[hole-1];
+  if(!last) return;                            // still on the ground tier
+  // 100 clears the lowest ledge on any tier (tightest margin is ~48px) while still
+  // firing well before the ball can reach the tier below, ~180px down
+  if(ball.y < last.y + 100) return;
+  flash('FELL BACK! +1 stroke');
   strokes++; total++;
   respawn(ball.homeX, ball.homeY);
   ball.rest = true;
@@ -708,6 +767,44 @@ function drawTrees(){
   }
 }
 
+function drawWinds(){
+  for(const w of WINDS){
+    const y = w.y-cam;
+    if(y > VH+20 || y+w.h < -20) continue;
+    const dir = w.ax > 0 ? 1 : -1, str = Math.abs(w.ax);
+    // faint body so the band's extent is readable
+    const g2 = ctx.createLinearGradient(0, y, 0, y+w.h);
+    g2.addColorStop(0,  'rgba(255,255,255,0)');
+    g2.addColorStop(0.5,'rgba(255,255,255,'+(0.05+str*0.5).toFixed(3)+')');
+    g2.addColorStop(1,  'rgba(255,255,255,0)');
+    ctx.fillStyle = g2; ctx.fillRect(w.x, y, w.w, w.h);
+    // streaks racing through
+    ctx.lineCap = 'round';
+    for(let i=0;i<20;i++){
+      const len = 22 + hsh(w.y+i*7.7)*46;
+      const ry  = y + 6 + hsh(w.y+i*3.1)*(w.h-12);
+      const spd = 0.10 + str*1.5;
+      const p   = ((perf*spd/1000) + hsh(w.y+i*1.7)) % 1;
+      const rx  = dir > 0 ? w.x - len + p*(w.w+len)
+                          : w.x + w.w + len - p*(w.w+len);
+      ctx.strokeStyle = 'rgba(255,255,255,'+(0.10+str*1.5).toFixed(2)+')';
+      ctx.lineWidth = 1 + hsh(w.y+i*5.3)*1.4;
+      ctx.beginPath();
+      for(let k=0;k<=len;k+=8){
+        const wy = ry + Math.sin((rx+k)*0.05 + perf/400 + i)*1.8;
+        k===0 ? ctx.moveTo(rx, wy) : ctx.lineTo(rx+k, wy);
+      }
+      ctx.stroke();
+      if(len > 44){                              // arrowhead on the long streaks
+        const hx = rx + (dir>0 ? len : 0);
+        ctx.beginPath();
+        ctx.moveTo(hx, ry-3.5); ctx.lineTo(hx+dir*6, ry); ctx.lineTo(hx, ry+3.5);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
 // Waterfalls spilling off ledge edges — decoration, no collision.
 const FALLS = [
   {x:  0, y:3978, w:34, h:390},
@@ -794,8 +891,9 @@ function drawBall(){
   }
 }
 
+let aimWind = 0;
 function drawAim(){
-  if(!aiming) return;
+  if(!aiming){ aimWind = 0; return; }
   const v = pull();
   const p = v.len/MAXPULL;
   // pull line
@@ -806,8 +904,11 @@ function drawAim(){
   ctx.setLineDash([]);
   // predicted arc
   let px = ball.x, py = ball.y, pvx = -v.dx*POWER, pvy = -v.dy*POWER;
+  aimWind = 0;
   for(let i=0;i<95;i++){
-    pvy += GRAV; pvx *= AIRDRAG; pvy *= AIRDRAG;
+    const wnd = windAt(px,py);                   // strongest wind along this line
+    if(Math.abs(wnd) > Math.abs(aimWind)) aimWind = wnd;
+    pvy += GRAV; pvx += wnd; pvx *= AIRDRAG; pvy *= AIRDRAG;
     px += pvx; py += pvy;
     if(i%4===0){
       const a = (1-i/95);
@@ -830,6 +931,23 @@ function hud(){
   ctx.fillText('STROKES ' + strokes, 130, 21);
   ctx.textAlign = 'right';
   ctx.fillText('TOTAL ' + total, VW-12, 21);
+  // wind readout — live wind on a ball in flight, strongest on the aimed line
+  const wnd = aiming ? aimWind : (ball.rest ? 0 : windAt(ball.x, ball.y));
+  if(wnd !== 0){
+    const dir = wnd > 0 ? 1 : -1, bars = Math.min(4, Math.round(Math.abs(wnd)/0.035));
+    ctx.fillStyle = 'rgba(8,14,32,.72)'; ctx.fillRect(VW/2-58, 34, 116, 20);
+    ctx.fillStyle = '#9fd8ff'; ctx.font = 'bold 12px ui-monospace,monospace';
+    ctx.textAlign = 'left'; ctx.fillText('WIND', VW/2-50, 48);
+    ctx.strokeStyle = Math.abs(wnd) > 0.1 ? '#ff9d4a' : '#9fd8ff';
+    ctx.lineWidth = 2; ctx.lineCap = 'round';
+    for(let i=0;i<bars;i++){
+      const ax = VW/2-8 + i*13, hx = dir > 0 ? ax+9 : ax;
+      ctx.beginPath(); ctx.moveTo(ax, 44); ctx.lineTo(ax+9, 44);
+      ctx.moveTo(hx-dir*4, 41); ctx.lineTo(hx, 44); ctx.lineTo(hx-dir*4, 47);
+      ctx.stroke();
+    }
+    ctx.textAlign = 'left';
+  }
   // altitude bar
   ctx.fillStyle = 'rgba(255,255,255,.2)'; ctx.fillRect(VW-6, 40, 3, VH-90);
   const f = 1 - (ball.y/WH);
@@ -871,7 +989,7 @@ let perf = 0;
 function loop(t){
   perf = t||0;
   step();
-  sky(); drawFalls(); drawBlocks(); drawTrees();
+  sky(); drawWinds(); drawFalls(); drawBlocks(); drawTrees();
   for(let i=0;i<HOLES.length;i++){
     if(i===hole || (i>hole && i<hole+3)) drawFlag(HOLES[i], i===hole);
   }
