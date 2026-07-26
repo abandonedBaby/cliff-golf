@@ -105,8 +105,10 @@ const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const VW = 480;
 let VH = 720, VX0 = 0, VWF = 480, SCALE = 1;
 // WH runs well below the floor so the camera can always scroll far enough past the
-// tee to leave a full pull-length of screen under the ball
-const WW = 480, WH = 4720;          // world size
+// tee to leave a full pull-length of screen under the ball. Set once the climb has
+// been generated, since the world's height depends on how many tiers it produced.
+const WW = 480;
+let WH = 4720;
 const GRAV = 0.34, AIRDRAG = 0.999;
 const R = 8;                         // ball radius
 // shorter pull, proportionally stronger — same 18.6 max launch speed, less mouse travel
@@ -125,9 +127,6 @@ const g=(x,y,w,h)=>B.push({x,y,w,h:h||18,t:'g'});
 
 // A hazard set into a ledge, with the ground wrapping up around both ends so it
 // sits in a walled basin instead of floating on the surface.
-// Ledges above this altitude are alpine: snow caps, icicles, falling snow.
-const SNOWLINE = 1000;
-
 function pit(x,y,w,t){
   const hh = t==='w' ? 10 : 13;                  // hazard depth
   B.push({x, y:y-hh, w, h:hh+8, t});             // hazard, sunk into the ledge top
@@ -142,104 +141,93 @@ function ramp(x,y,w,h,dir){
   B[B.length-1].base = true;      // support block: no grass cap, no trees
 }
 
-// ground
-// Floor overhangs the walls, and the walls run far above the summit — otherwise a
-// big shot off the top tier sails over them and falls outside the world forever.
-g(-60,4360,600,360);                           // floor + deep bedrock below it
-g(-30,-3000,30,7720); g(480,-3000,30,7720);    // invisible side walls
+// ---------------------------------------------------------------- generation
+// The climb is built procedurally from a FIXED seed, so the mountain is the same
+// every session — only the pin positions move run to run. Three biomes stack up
+// it: desert at the base, green belt in the middle, snow and ice at the summit.
+let _seed = 20260726;
+const rnd = () => { _seed = (_seed*1664525 + 1013904223) >>> 0; return _seed/4294967296; };
+const rr = (a,b) => a + rnd()*(b-a);
+
+const TIER_N = 27, SUMMIT_Y = 300;
+const TIER_Y = [];
+(function stackTiers(){
+  let y = SUMMIT_Y;
+  TIER_Y[TIER_N-1] = y;
+  for(let i=TIER_N-2;i>=0;i--){ y += 188 + Math.round(rnd()*46); TIER_Y[i] = y; }
+})();
+const GROUND_Y = TIER_Y[0] + 200;
+const CLIMB = GROUND_Y - SUMMIT_Y;
+WH = GROUND_Y + 420;                 // bedrock bottom = world bottom
+
+// 0 at the tee, 1 at the summit
+const altOf = y => Math.max(0, Math.min(1, (GROUND_Y - y)/CLIMB));
+const biomeOf = y => { const f = altOf(y); return f < 0.36 ? 'desert' : f < 0.72 ? 'green' : 'alpine'; };
+const SNOWLINE = GROUND_Y - CLIMB*0.72;         // alpine starts here
+
+function hazardFor(bio){
+  const r = rnd();
+  if(bio === 'desert') return r < 0.72 ? 's'    : r < 0.88 ? 'tg'  : 'w';
+  if(bio === 'green')  return r < 0.40 ? 'w'    : r < 0.74 ? 'tg'  : 's';
+  return                      r < 0.50 ? 'snow' : r < 0.90 ? 'ice' : 'w';
+}
+function overlapsAny(x,y,w,h,pad){
+  return B.some(b => !b.wall && x < b.x+b.w+pad && x+w+pad > b.x &&
+                              y < b.y+b.h+pad && y+h+pad > b.y);
+}
+
+// ground: floor overhangs the walls, and the walls run far above the summit —
+// otherwise a big shot off the top tier sails over them and is lost forever.
+g(-60, GROUND_Y, 600, 420);
+g(-30, SUMMIT_Y-3200, 30, CLIMB+7000); g(480, SUMMIT_Y-3200, 30, CLIMB+7000);
 B[B.length-1].wall = B[B.length-2].wall = true;
 
-// tier 1
-g(30,4180,150); ramp(180,4140,60,40,1);
-g(240,4140,100); pit(265,4140,60,'s');
-g(380,4200,100);
-// tier 2
-g(0,3960,130); pit(30,3960,70,'w');
-g(180,3990,140);
-g(390,3930,90);
-// tier 3
-g(50,3760,120);
-g(230,3720,70);
-g(350,3790,120); pit(375,3790,70,'tg');
-// tier 4
-g(0,3560,90);
-g(160,3520,150); pit(175,3520,55,'w'); ramp(310,3480,60,40,1);
-g(370,3480,90);
-// tier 5
-g(60,3340,140); pit(155,3340,40,'s');
-g(270,3300,90);
-g(400,3360,80);
-// tier 6
-g(0,3120,110);
-g(170,3090,120);
-g(330,3140,150); pit(360,3140,80,'w');
-// tier 7
-g(40,2900,90);
-g(200,2860,110); ramp(310,2820,50,40,1);
-g(340,2910,120); pit(365,2910,70,'s');
-// tier 8
-g(0,2690,130); pit(25,2690,80,'w');
-g(190,2650,120);
-g(370,2700,110);
-// tier 9
-g(70,2470,100);
-g(230,2420,100); ramp(330,2380,60,40,1);
-g(370,2480,100); pit(390,2480,60,'tg');
-// tier 10
-g(0,2250,100);
-g(140,2220,110);
-g(300,2260,90); pit(320,2260,50,'s');
-g(430,2200,50);
-// tier 11
-g(30,2030,90);
-g(180,1980,110); ramp(290,1940,60,40,1);
-g(320,2030,150); pit(345,2030,100,'w');
-// tier 12
-g(0,1810,90);
-g(150,1770,110);
-g(290,1800,80);
-g(400,1760,80);
-// tier 13
-g(50,1580,100); pit(70,1580,60,'s');
-g(200,1540,110); ramp(310,1500,60,40,1);
-g(360,1590,110); pit(380,1590,70,'tg');
-// tier 14
-g(0,1360,90);
-g(140,1320,110);
-g(290,1360,70);
-g(400,1310,80);
-// tier 15
-g(40,1130,100); ramp(140,1090,60,40,1);
-g(250,1090,120); pit(255,1090,35,'w');
-g(400,1140,80);
-// tier 16 — above the snow line from here up
-g(0,900,100); ramp(100,860,60,40,1);
-g(160,860,110);
-g(330,900,130); pit(355,900,70,'snow');
-// tier 17
-g(60,670,90); ramp(150,590,60,40,1);
-g(230,630,110);
-g(390,680,90); pit(395,680,60,'ice');
-// tier 18 — summit
-g(140,430,200); pit(150,430,50,'ice');
-g(190,220,130); pit(285,220,30,'snow');
+// Each tier gets one "pin ledge" sitting exactly on the tier line (cups are only
+// ever placed there) plus a couple of jittered neighbours to bounce around on.
+const PIN_LEDGE = [];
+for(let i=0;i<TIER_N;i++){
+  const ty = TIER_Y[i], bio = biomeOf(ty);
+  const n = rnd() < 0.45 ? 2 : 3;
+  const slot = 480/n, pinSlot = Math.floor(rnd()*n);
+  for(let k=0;k<n;k++){
+    const isPin = k === pinSlot;
+    const w = Math.round(rr(isPin ? 104 : 78, isPin ? 156 : 140));
+    const lo = k*slot + 6, hi = k*slot + slot - w - 6;
+    const x = Math.round(hi > lo ? rr(lo, hi) : lo);
+    const yy = isPin ? ty : ty + Math.round(rr(-38, 38));
+    g(x, yy, w);
+    if(isPin) PIN_LEDGE[i] = {x, y:ty, w};
+    // hazard basin — only where it still leaves room for a cup and a run-up
+    if(isPin){
+      // a pin ledge may only carry a hazard tucked against one end, sized to leave
+      // a clear 100px of bare ledge for the cup and its run-up
+      const hw = Math.min(70, w - 106);
+      if(hw >= 32 && rnd() < 0.45){
+        const hx = rnd() < 0.5 ? x+8 : x+w-hw-8;
+        pit(Math.round(hx), yy, Math.round(hw), hazardFor(bio));
+      }
+    } else {
+      const room = w - 66;
+      if(room >= 34 && rnd() < 0.62){
+        const hw = Math.round(rr(32, Math.min(78, room)));
+        const hx = Math.round(rr(x+8, x+w-hw-8));
+        pit(hx, yy, hw, hazardFor(bio));
+      }
+    }
+    // a kicker ramp off the right end now and then, if there is clear air for it.
+    // Start one pixel clear of this ledge, or it always collides with its own parent.
+    if(!isPin && rnd() < 0.34 && x+w+62 < 474 && !overlapsAny(x+w+1, yy-40, 60, 52, 0)){
+      ramp(x+w+1, yy-40, 60, 40, 1);
+    }
+  }
+}
 
 // ------------------------------------------------------------------- holes
 // One cup per tier, re-drawn at the start of every run. A candidate x only
-// qualifies if it sits on bare ledge, well inside the ends, clear of hazards,
+// qualifies if it sits on the pin ledge, well inside the ends, clear of hazards,
 // basin lips and ramps, and with a clear run-up from at least one side — so a
 // random layout is always still puttable.
-const TIER_Y = [4180,3990,3760,3520,3340,3090,2860,2650,2420,2220,
-                1980,1770,1540,1320,1090,860,630,430,220];
-// used if a tier somehow yields no valid spot
-const FALLBACK = [
-  {x: 95, y:4180}, {x:245, y:3990}, {x:110, y:3760}, {x:255, y:3520},
-  {x:130, y:3340}, {x:225, y:3090}, {x:245, y:2860}, {x:245, y:2650},
-  {x:280, y:2420}, {x:190, y:2220}, {x:225, y:1980}, {x:190, y:1770},
-  {x:245, y:1540}, {x:185, y:1320}, {x:330, y:1090}, {x:210, y: 860},
-  {x:275, y: 630}, {x:240, y: 430}, {x:250, y: 220},
-];
-let HOLES = FALLBACK.map(h => ({x:h.x, y:h.y}));
+let HOLES = TIER_Y.map((y,i) => ({x: PIN_LEDGE[i].x + PIN_LEDGE[i].w/2, y}));
 
 // anything that isn't plain walkable ledge near this point?
 function cupBlocked(px, ty){
@@ -250,7 +238,7 @@ function cupBlocked(px, ty){
     return px > b.x-15 && px < b.x+b.w+15 && Math.abs(b.y-ty) < 42;
   });
 }
-function pickCup(ty){
+function cupCandidates(ty){
   const cands = [];
   for(const b of B){
     if(b.t !== 'g' || b.wall || b.base || b.w < 58) continue;
@@ -263,18 +251,40 @@ function pickCup(ty){
       if(runL || runR) cands.push(x);
     }
   }
+  return cands;
+}
+function pickCup(ty){
+  const cands = cupCandidates(ty);
   if(!cands.length) return null;
   return {x: cands[(Math.random()*cands.length)|0], y: ty};
 }
+
+// Guarantee every tier can hold a legal cup. If a hazard has boxed in a pin ledge
+// despite the sizing rules, strip it off that ledge — a tier with nowhere to put
+// the pin would otherwise drop the cup onto sand or water.
+(function guaranteeCups(){
+  for(let i=0;i<TIER_N;i++){
+    if(cupCandidates(TIER_Y[i]).length) continue;
+    const pl = PIN_LEDGE[i];
+    for(let k=B.length-1;k>=0;k--){
+      const b = B[k];
+      if(b.wall || b.base) continue;
+      const onPin = b.x >= pl.x-8 && b.x+b.w <= pl.x+pl.w+8 && Math.abs(b.y-pl.y) < 34;
+      if(onPin && (b.t !== 'g' || b.w <= 6)) B.splice(k,1);   // hazard body or its lips
+    }
+  }
+})();
 function pickHoles(){
-  HOLES = TIER_Y.map((ty,i) => pickCup(ty) || {x:FALLBACK[i].x, y:FALLBACK[i].y});
+  // falls back to the middle of the tier's pin ledge, which always exists
+  HOLES = TIER_Y.map((ty,i) => pickCup(ty) ||
+    {x: Math.round(PIN_LEDGE[i].x + PIN_LEDGE[i].w/2), y: ty});
 }
 
-const TEE = {x: 60, y: 4360 - R};
+const TEE = {x: 60, y: GROUND_Y - R};
 
 // ------------------------------------------------------------- leaderboard
 // Local to this browser (localStorage). It is golf: FEWER strokes wins, so the
-// board sorts ascending. Only completed 19-hole runs qualify — otherwise an
+// board sorts ascending. Only runs completed to the summit qualify — otherwise an
 // abandoned run with 3 strokes would sit at the top forever.
 const LS_SCORES = 'cliffgolf.scores.v1', LS_NAME = 'cliffgolf.name', BOARD_MAX = 10;
 function storageOK(){
@@ -304,16 +314,24 @@ function savedName(){ try{ return localStorage.getItem(LS_NAME) || ''; }catch(e)
 // Bands of moving air sitting in the gaps between tiers. They push the ball
 // sideways while it is in flight only — a resting ball is never moved. Strength
 // climbs as you get higher, and directions alternate so you must read each gap.
-const WINDS = [
-  {x:  0, y:3380, w:480, h:120, ax: 0.05},
-  {x:  0, y:2920, w:480, h:140, ax:-0.06},
-  {x:150, y:2470, w:330, h:150, ax: 0.08},
-  {x:  0, y:2030, w:320, h:150, ax:-0.09},
-  {x:  0, y:1590, w:480, h:150, ax: 0.10},
-  {x:120, y:1140, w:360, h:150, ax:-0.11},
-  {x:  0, y: 680, w:480, h:160, ax: 0.12},
-  {x:  0, y: 260, w:480, h:140, ax:-0.13},
-];
+// Generated into the gaps between tiers. Desert bands are dust storms, the summit
+// gets driving snow; strength climbs with altitude and directions alternate.
+const WINDS = [];
+(function blowWind(){
+  let dir = 1;
+  for(let i=1;i<TIER_N;i+=2){
+    const top = TIER_Y[i] + 52, bot = TIER_Y[i-1] - 58;
+    const h = bot - top;
+    if(h < 70) continue;
+    const f = altOf(top);
+    const full = rnd() < 0.55;
+    const w = full ? 480 : Math.round(rr(280, 420));
+    const x = full ? 0 : Math.round(rr(0, 480-w));
+    WINDS.push({x, y:top, w, h:Math.min(h,170),
+      ax: dir*(0.045 + f*0.09), bio: biomeOf(top)});
+    dir = -dir;
+  }
+})();
 function windAt(x,y){
   let ax = 0;
   for(const w of WINDS)
@@ -325,26 +343,21 @@ function windAt(x,y){
 // patrol the open air between ledges — clip one mid-flight and your shot is done for
 // [xLeft, xRight, y, speed, bobAmount]
 const BIRDS = [];
-const bird=(x0,x1,y,sp,bob)=>BIRDS.push({x0,x1,y,sp,bob:bob||8,
+const bird=(x0,x1,y,sp,bob,bio)=>BIRDS.push({x0,x1,y,sp,bob:bob||8,bio:bio||'green',
   t:Math.random(), dir:Math.random()<0.5?-1:1, flap:Math.random()*6, oy:0, stun:0, x:x0, cy:y});
-bird( 40,300,4060,0.55);
-bird(200,450,3860,0.7);
-bird( 30,260,3640,0.85, 14);
-bird(180,460,3430,0.75);
-bird( 20,300,3210,0.95, 16);
-bird(150,440,2990,0.85);
-bird( 40,320,2770,1.05, 18);
-bird(180,460,2550,0.95);
-bird( 20,280,2330,1.15, 14);
-bird(160,450,2120,1.05, 20);
-bird( 30,300,1890,1.25, 16);
-bird(170,460,1670,1.15);
-bird( 20,290,1450,1.35, 22);
-bird(150,440,1220,1.25, 16);
-bird( 30,310, 990,1.45, 18);
-bird(170,460, 770,1.35, 24);
-bird( 40,300, 540,1.55, 20);
-bird(140,420, 330,1.45, 18);
+(function flock(){
+  for(let i=1;i<TIER_N;i++){
+    const y = Math.round((TIER_Y[i] + TIER_Y[i-1])/2);
+    const bio = biomeOf(y);
+    // sparse over the desert (a lone circling vulture), busiest through the green belt
+    if(bio === 'desert' && rnd() < 0.55) continue;
+    if(bio === 'alpine' && rnd() < 0.25) continue;
+    const w = Math.round(rr(230, 300));
+    const x0 = Math.round(rr(10, 480-w-10));
+    bird(x0, x0+w, y, +rr(0.5, 0.8 + altOf(y)*0.9).toFixed(2),
+         Math.round(rr(8, 22)), bio);
+  }
+})();
 
 function resetBirds(){
   for(const b of BIRDS){ b.stun = 0; b.oy = 0; b.t = Math.random(); }
@@ -715,19 +728,38 @@ function ridge(depth, rgb, alpha, amp, step, seed){
   }
 }
 
+// Sky palette per biome, blended smoothly so the climb changes colour gradually
+// rather than snapping at the biome borders. [high, mid, low] stops.
+const SKY_BANDS = [
+  {f:0.00, c:['#5a3f2e','#b2703c','#e8b06a']},   // desert floor: dust and heat haze
+  {f:0.30, c:['#3f4a76','#8f7f8e','#ddb98a']},
+  {f:0.52, c:['#16305e','#3f7fbe','#a9dcf5']},   // green belt: clear blue
+  {f:0.78, c:['#0c1c48','#22508f','#7fb6dd']},
+  {f:1.00, c:['#050a24','#101f4e','#2f4f86']},   // summit: thin dark air
+];
+function skyStops(f){
+  let i = 0;
+  while(i < SKY_BANDS.length-2 && f > SKY_BANDS[i+1].f) i++;
+  const a = SKY_BANDS[i], b = SKY_BANDS[i+1];
+  const t = Math.max(0, Math.min(1, (f-a.f)/(b.f-a.f)));
+  return [0,1,2].map(k => mix(a.c[k], b.c[k], t));
+}
+
 function sky(){
   const gr = ctx.createLinearGradient(0,0,0,VH);
-  // t: 0 at the summit, 1 at ground level — thin cold sky up high, warm haze below
-  const t = Math.max(0, Math.min(1, cam/(WH-VH)));
-  gr.addColorStop(0,   mix('#0a1338','#6fb7e8', t));
-  gr.addColorStop(0.55,mix('#1c3068','#9ed6f5', t));
-  gr.addColorStop(1,   mix('#3b5fa8','#d8f0ff', t));
+  const fTop = altOf(cam), fBot = altOf(cam+VH);
+  const top = skyStops(fTop), bot = skyStops(fBot);
+  gr.addColorStop(0,   top[0]);
+  gr.addColorStop(0.55,top[1]);                  // already rgb() — don't re-mix
+  gr.addColorStop(1,   bot[2]);
   ctx.fillStyle = gr; ctx.fillRect(VX0,0,VWF,VH);
-  // stars near the top of the map
-  if(cam < 1100){
-    const a = 1-cam/1100;
+  // stars come out in the thin air near the summit
+  const starF = (altOf(cam) - 0.62)/0.3;
+  if(starF > 0){
+    const a = Math.min(1, starF);
+    const band = CLIMB*0.42;
     for(let i=0;i<90;i++){
-      const sx = VX0 + (i*97)%VWF, sy = (i*173)%1100 - cam;
+      const sx = VX0 + (i*97)%VWF, sy = (i*173)%band - cam + SUMMIT_Y - band*0.2;
       if(sy>0&&sy<VH){
         const tw = 0.5+0.5*Math.sin(perf/420+i);
         ctx.fillStyle = 'rgba(255,255,255,'+(a*tw*0.9).toFixed(2)+')';
@@ -736,15 +768,18 @@ function sky(){
     }
   }
   // bedrock bleed — keeps the horizon solid out to the screen edges on wide displays
-  const fy = 4360-cam;
+  const fy = GROUND_Y-cam;
   if(fy < VH){
-    const top = Math.max(0, fy);
-    ctx.fillStyle = '#33200f'; ctx.fillRect(VX0, top, VWF, VH-top);
-    if(fy >= 0){ ctx.fillStyle = '#24701f'; ctx.fillRect(VX0, fy, VWF, 7); }
+    const gTop = Math.max(0, fy);
+    ctx.fillStyle = '#3a2412'; ctx.fillRect(VX0, gTop, VWF, VH-gTop);
+    if(fy >= 0){ ctx.fillStyle = '#c8a469'; ctx.fillRect(VX0, fy, VWF, 7); }
   }
-  // parallax mountains
-  ridge(0.22, '96,132,180', 0.40, 150, 16, 3.1);
-  ridge(0.42, '58,88,136',  0.52, 110, 13, 8.7);
+  // parallax ranges — dunes down low, blue peaks mid, white summits up top
+  const fr = altOf(cam + VH*0.5);
+  const far  = fr < 0.36 ? '150,116,74'  : fr < 0.72 ? '96,132,180' : '150,178,214';
+  const near = fr < 0.36 ? '120,88,52'   : fr < 0.72 ? '58,88,136'  : '96,126,170';
+  ridge(0.22, far,  0.40, 150, 16, 3.1);
+  ridge(0.42, near, 0.52, 110, 13, 8.7);
   // clouds, two drifting layers
   for(let L=0;L<2;L++){
     const dep = L?0.72:0.5, sz = L?1:0.7;
@@ -812,6 +847,28 @@ function grassCap(x,y,w,seed){
     if(o<0.45) continue;
     const sw = Math.sin(perf/900+sx*0.2)*1.2;
     ctx.beginPath(); ctx.moveTo(sx, y+1); ctx.lineTo(sx+sw, y-2-o*3); ctx.stroke();
+  }
+}
+
+// desert cap: baked sand crust over the rock, with dry scrub tufts
+function duneCap(x,y,w,seed){
+  ctx.fillStyle = '#d9b878';
+  for(let sx=x; sx<x+w; sx+=8){                  // crumbling underside
+    const d = 2+hsh(seed+sx*0.53)*4;
+    ctx.beginPath(); ctx.arc(sx+4, y+6, 4, 0, Math.PI); ctx.fill();
+    ctx.fillRect(sx, y+4, 8, d);
+  }
+  ctx.fillStyle = '#d9b878'; ctx.fillRect(x,y,w,7);
+  ctx.fillStyle = '#ecd39a'; ctx.fillRect(x,y,w,3.5);
+  ctx.fillStyle = '#f7e7bd'; ctx.fillRect(x,y,w,1.5);
+  ctx.strokeStyle = '#9a8a4e'; ctx.lineWidth = 1.2; ctx.lineCap = 'round';
+  for(let sx=x+3; sx<x+w-1; sx+=9){              // dry scrub
+    const o = hsh(seed+sx*0.29);
+    if(o < 0.62) continue;
+    const sw = Math.sin(perf/700+sx*0.2)*1.6;
+    ctx.beginPath(); ctx.moveTo(sx, y+1);
+    ctx.lineTo(sx+sw-2, y-2-o*3); ctx.moveTo(sx, y+1); ctx.lineTo(sx+sw+2, y-1-o*3);
+    ctx.stroke();
   }
 }
 
@@ -947,12 +1004,15 @@ function drawBlocks(){
       const x1 = b.x, y1 = b.dir>0 ? yBot-3 : yTop-3;
       const x2 = b.x+b.w, y2 = b.dir>0 ? yTop-3 : yBot-3;
       ctx.lineCap = 'butt';
-      const alpine = b.y < SNOWLINE;
-      ctx.strokeStyle = alpine ? '#cfe0f2' : '#2c8a33'; ctx.lineWidth = 8;
+      const bio = biomeOf(b.y);
+      const cap = bio === 'alpine' ? ['#cfe0f2','#e8f2fb','#ffffff']
+                : bio === 'desert' ? ['#d9b878','#ecd39a','#f7e7bd']
+                                   : ['#2c8a33','#46bd45','#74e26d'];
+      ctx.strokeStyle = cap[0]; ctx.lineWidth = 8;
       ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-      ctx.strokeStyle = alpine ? '#e8f2fb' : '#46bd45'; ctx.lineWidth = 4;
+      ctx.strokeStyle = cap[1]; ctx.lineWidth = 4;
       ctx.beginPath(); ctx.moveTo(x1,y1-1); ctx.lineTo(x2,y2-1); ctx.stroke();
-      ctx.strokeStyle = alpine ? '#ffffff' : '#74e26d'; ctx.lineWidth = 1.5;
+      ctx.strokeStyle = cap[2]; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(x1,y1-3); ctx.lineTo(x2,y2-3); ctx.stroke();
       continue;
     }
@@ -975,7 +1035,10 @@ function drawBlocks(){
       ctx.fillStyle = dg; ctx.fillRect(b.x, y+40, b.w, b.h-40);
       ctx.restore();
     }
-    if(!b.base) (b.y < SNOWLINE ? snowCap : grassCap)(b.x, y, b.w, seed);
+    if(!b.base){
+      const bio = biomeOf(b.y);
+      (bio === 'alpine' ? snowCap : bio === 'desert' ? duneCap : grassCap)(b.x, y, b.w, seed);
+    }
   }
 }
 
@@ -999,7 +1062,9 @@ function seedTrees(){
       if(!clear(x, b.y)) continue;
       if(floor && Math.abs(x-TEE.x) < 60) continue;
       const r = hsh(x*3.1 + b.y*0.7);
-      TREES.push({x, y:b.y, pine:r<0.55, s:0.72+r*0.7, seed:x*0.13+b.y*0.07});
+      const bio = biomeOf(b.y);
+      TREES.push({x, y:b.y, bio, pine:r<0.55, s:0.72+r*0.7, seed:x*0.13+b.y*0.07,
+                  arms: r<0.4 ? 2 : (r<0.75 ? 1 : 0)});
     }
   }
 }
@@ -1011,6 +1076,34 @@ function drawTrees(){
     const s = t.s, sway = Math.sin(perf/1100 + t.seed)*2.2;
     ctx.fillStyle = 'rgba(0,0,0,.18)';            // root shadow
     ctx.beginPath(); ctx.ellipse(t.x, y+1, 9*s, 3*s, 0, 0, 7); ctx.fill();
+
+    if(t.bio === 'desert'){                       // saguaro cactus
+      const H = 34*s, wdt = 6*s;
+      const body = ctx.createLinearGradient(t.x-wdt, 0, t.x+wdt, 0);
+      body.addColorStop(0,'#2f7a44'); body.addColorStop(0.45,'#41a05a'); body.addColorStop(1,'#256237');
+      ctx.fillStyle = body; ctx.lineCap = 'round';
+      ctx.fillRect(t.x-wdt, y-H, wdt*2, H);
+      ctx.beginPath(); ctx.arc(t.x, y-H, wdt, Math.PI, 0); ctx.fill();
+      const arm = (dir, at, len) => {             // elbowed arm
+        ctx.strokeStyle = '#37905060'; ctx.lineWidth = wdt*1.7;
+        ctx.strokeStyle = '#379050';
+        ctx.beginPath();
+        ctx.moveTo(t.x + dir*wdt*0.6, y-H*at);
+        ctx.lineTo(t.x + dir*wdt*2.6, y-H*at);
+        ctx.lineTo(t.x + dir*wdt*2.6, y-H*(at+len));
+        ctx.stroke();
+      };
+      if(t.arms > 0) arm(1, 0.46, 0.28);
+      if(t.arms > 1) arm(-1, 0.62, 0.22);
+      ctx.strokeStyle = 'rgba(20,60,35,.5)'; ctx.lineWidth = 1;
+      for(let i=-1;i<=1;i++){                     // ribs
+        ctx.beginPath(); ctx.moveTo(t.x+i*wdt*0.55, y-H+2); ctx.lineTo(t.x+i*wdt*0.55, y-2); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,255,255,.25)';
+      ctx.fillRect(t.x-wdt*0.75, y-H+3, 1.5, H-6);
+      continue;
+    }
+
     ctx.fillStyle = '#5a3a22';                    // trunk
     ctx.beginPath();
     ctx.moveTo(t.x-2.5*s, y+1); ctx.lineTo(t.x+2.5*s, y+1);
@@ -1061,7 +1154,7 @@ function drawTrees(){
 // Falling snow in the alpine band. Weather, not terrain — it drifts with the local
 // wind so the two effects agree with each other.
 function drawSnowfall(){
-  const a = Math.max(0, Math.min(1, (SNOWLINE + 250 - cam)/800));
+  const a = Math.min(1, Math.max(0, (altOf(cam+VH*0.5) - 0.66)/0.16));
   if(a <= 0) return;
   const drift = windAt(240, cam + VH/2) * 900;
   for(let i=0;i<120;i++){
@@ -1081,12 +1174,24 @@ function drawWinds(){
     const y = w.y-cam;
     if(y > VH+20 || y+w.h < -20) continue;
     const dir = w.ax > 0 ? 1 : -1, str = Math.abs(w.ax);
+    const dust = w.bio === 'desert';
+    const tint = dust ? '224,182,112' : '255,255,255';
     // faint body so the band's extent is readable
     const g2 = ctx.createLinearGradient(0, y, 0, y+w.h);
-    g2.addColorStop(0,  'rgba(255,255,255,0)');
-    g2.addColorStop(0.5,'rgba(255,255,255,'+(0.05+str*0.5).toFixed(3)+')');
-    g2.addColorStop(1,  'rgba(255,255,255,0)');
+    g2.addColorStop(0,  'rgba('+tint+',0)');
+    g2.addColorStop(0.5,'rgba('+tint+','+((dust?0.16:0.05)+str*0.5).toFixed(3)+')');
+    g2.addColorStop(1,  'rgba('+tint+',0)');
     ctx.fillStyle = g2; ctx.fillRect(w.x, y, w.w, w.h);
+    if(dust){                                    // grit tumbling through the storm
+      for(let i=0;i<46;i++){
+        const s1 = hsh(w.y+i*2.3), s2 = hsh(w.y+i*5.1);
+        const p = ((perf*(0.10+str*1.3)/1000) + s1) % 1;
+        const gx = dir > 0 ? w.x + p*w.w : w.x + w.w - p*w.w;
+        const gy = y + 4 + s2*(w.h-8) + Math.sin(perf/260 + i)*3;
+        ctx.fillStyle = 'rgba(196,150,86,'+(0.25+s2*0.45).toFixed(2)+')';
+        ctx.fillRect(gx, gy, 1.5+s1*2, 1.5+s1*1.5);
+      }
+    }
     // streaks racing through
     ctx.lineCap = 'round';
     for(let i=0;i<20;i++){
@@ -1115,13 +1220,29 @@ function drawWinds(){
 }
 
 // Waterfalls spilling off ledge edges — decoration, no collision.
-const FALLS = [
-  {x:  0, y:3978, w:34, h:390},
-  {x:446, y:3158, w:34, h:202},
-  {x:436, y:2048, w:34, h:152},
-  {x: 40, y:1148, w:34, h:212},
-  {x:140, y: 448, w:34, h:222},
-];
+// Spill off ledge ends in the green belt, where there is water to spill.
+const FALLS = [];
+(function pourFalls(){
+  const green = B.filter(b => b.t === 'g' && !b.wall && !b.base && b.w >= 80 &&
+                              biomeOf(b.y) === 'green');
+  for(const b of green){
+    if(rnd() > 0.28) continue;
+    const left = rnd() < 0.5;
+    const x = left ? b.x : b.x + b.w - 34;
+    if(x < 0 || x + 34 > 480) continue;
+    // find the next solid surface below to land on
+    let land = GROUND_Y;
+    for(const o of B){
+      if(o.wall || o.t === 'r') continue;
+      if(o.y <= b.y + 24) continue;
+      if(x + 34 < o.x || x > o.x + o.w) continue;
+      land = Math.min(land, o.y);
+    }
+    const h = land - (b.y + 18);
+    if(h > 90) FALLS.push({x, y:b.y + 18, w:34, h});
+    if(FALLS.length >= 6) return;
+  }
+})();
 function drawFalls(){
   for(const f of FALLS){
     const y = f.y-cam;
