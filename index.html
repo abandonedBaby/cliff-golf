@@ -88,7 +88,7 @@
     </div>
     <ol id="pBoard"></ol>
     <div class="row">
-      <button id="pShare">SHARE IMAGE</button>
+      <button id="pShare">SHARE BADGE</button>
       <button id="pAgain">PLAY AGAIN</button>
     </div>
     <p id="pNote"></p>
@@ -119,6 +119,9 @@ const g=(x,y,w,h)=>B.push({x,y,w,h:h||18,t:'g'});
 
 // A hazard set into a ledge, with the ground wrapping up around both ends so it
 // sits in a walled basin instead of floating on the surface.
+// Ledges above this altitude are alpine: snow caps, icicles, falling snow.
+const SNOWLINE = 1000;
+
 function pit(x,y,w,t){
   const hh = t==='w' ? 10 : 13;                  // hazard depth
   B.push({x, y:y-hh, w, h:hh+8, t});             // hazard, sunk into the ledge top
@@ -203,17 +206,17 @@ g(400,1310,80);
 g(40,1130,100); ramp(140,1090,60,40,1);
 g(250,1090,120); pit(255,1090,35,'w');
 g(400,1140,80);
-// tier 16
+// tier 16 — above the snow line from here up
 g(0,900,100); ramp(100,860,60,40,1);
 g(160,860,110);
-g(330,900,130); pit(355,900,70,'s');
+g(330,900,130); pit(355,900,70,'snow');
 // tier 17
 g(60,670,90); ramp(150,590,60,40,1);
 g(230,630,110);
-g(390,680,90);
+g(390,680,90); pit(395,680,60,'ice');
 // tier 18 — summit
-g(140,430,200); pit(150,430,50,'tg');
-g(190,220,130);
+g(140,430,200); pit(150,430,50,'ice');
+g(190,220,130); pit(285,220,30,'snow');
 
 // ------------------------------------------------------------------- holes
 // each hole = cup position (x, groundY) — sink here to advance
@@ -502,7 +505,8 @@ function step(){
   tugCam();
 }
 
-const STICKY = t => t==='s' || t==='tg';         // sand and tall grass both kill momentum
+// sand, tall grass and deep snow all kill momentum; ice does the opposite
+const STICKY = t => t==='s' || t==='tg' || t==='snow';
 const rampY = (b,x) => {                          // surface height at a given x
   const u = Math.max(0, Math.min(1, (x-b.x)/b.w));
   return b.dir > 0 ? b.y + b.h*(1-u) : b.y + b.h*u;
@@ -537,12 +541,16 @@ function collide(){
 
     const vn = ball.vx*nx + ball.vy*ny;
     if(vn < 0){
-      const bounce = STICKY(b.t) ? 0.06 : 0.44;
+      const bounce = STICKY(b.t) ? 0.06 : b.t==='ice' ? 0.52 : 0.44;
       ball.vx -= (1+bounce)*vn*nx;
       ball.vy -= (1+bounce)*vn*ny;
     }
-    // tangential friction
-    const f = b.t==='s' ? 0.55 : b.t==='tg' ? 0.66 : 0.985;
+    // tangential friction — ice is near frictionless, snow swallows the ball
+    const f = b.t==='s'    ? 0.55
+            : b.t==='tg'   ? 0.66
+            : b.t==='snow' ? 0.60
+            : b.t==='ice'  ? 0.999
+            : 0.985;
     const tx = -ny, ty = nx;
     let vt = ball.vx*tx + ball.vy*ty;
     const nvt = vt*f;
@@ -562,6 +570,7 @@ function edgeGrip(){
     if(b.wall || b.base || b.t==='w' || b.t==='r' || b.w < 24) continue;
     if(Math.abs((ball.y+R) - b.y) > 3) continue;          // must be riding its top
     if(ball.x < b.x-R || ball.x > b.x+b.w+R) continue;
+    if(b.t === 'ice') return;                             // ice never grabs — that's the point
     const dL = ball.x - b.x, dR = (b.x+b.w) - ball.x;
     const d  = Math.min(dL, dR);
     if(d > GRIP_W) return;                                 // safely inboard
@@ -657,7 +666,8 @@ function ridge(depth, col, amp, step, seed){
 
 function sky(){
   const gr = ctx.createLinearGradient(0,0,0,VH);
-  const t = 1 - Math.max(0, Math.min(1, cam/(WH-VH)));   // 0 top .. 1 bottom
+  // t: 0 at the summit, 1 at ground level — thin cold sky up high, warm haze below
+  const t = Math.max(0, Math.min(1, cam/(WH-VH)));
   gr.addColorStop(0,   mix('#0a1338','#6fb7e8', t));
   gr.addColorStop(0.55,mix('#1c3068','#9ed6f5', t));
   gr.addColorStop(1,   mix('#3b5fa8','#d8f0ff', t));
@@ -754,6 +764,32 @@ function grassCap(x,y,w,seed){
   }
 }
 
+// snow cap for alpine ledges: drifted white crest with icicles hanging beneath
+function snowCap(x,y,w,seed){
+  ctx.fillStyle = '#cfe0f2';
+  for(let sx=x; sx<x+w; sx+=8){                  // drifted underside
+    const d = 3+hsh(seed+sx*0.53)*5;
+    ctx.beginPath(); ctx.arc(sx+4, y+6, 4.4, 0, Math.PI); ctx.fill();
+    ctx.fillRect(sx, y+4, 8, d);
+  }
+  ctx.fillStyle = '#dceaf7'; ctx.fillRect(x,y,w,8);
+  ctx.fillStyle = '#f2f8ff'; ctx.fillRect(x,y,w,4);
+  ctx.fillStyle = '#ffffff';
+  for(let sx=x; sx<x+w; sx+=7){                  // wind-blown crest
+    const h = 1.5+hsh(seed+sx*0.31)*3;
+    ctx.fillRect(sx, y-h, 7, h+2);
+  }
+  ctx.fillStyle = '#bcd6ee';                     // icicles
+  for(let sx=x+3; sx<x+w-2; sx+=9){
+    const o = hsh(seed+sx*0.77);
+    if(o < 0.45) continue;
+    const len = 5+o*11;
+    ctx.beginPath();
+    ctx.moveTo(sx-1.6, y+8); ctx.lineTo(sx+1.6, y+8); ctx.lineTo(sx, y+8+len);
+    ctx.closePath(); ctx.fill();
+  }
+}
+
 function drawBlocks(){
   for(const b of B){
     const y = b.y-cam;
@@ -799,6 +835,40 @@ function drawBlocks(){
       ctx.fillRect(b.x, y, 3, b.h); ctx.fillRect(b.x+b.w-3, y, 3, b.h);
       continue;
     }
+    if(b.t==='snow'){
+      const g2 = ctx.createLinearGradient(0,y,0,y+b.h);
+      g2.addColorStop(0,'#ffffff'); g2.addColorStop(1,'#c4d8ec');
+      ctx.fillStyle = g2; ctx.fillRect(b.x, y, b.w, b.h);
+      ctx.fillStyle = 'rgba(150,180,210,.45)';    // scooped drifts
+      for(let i=0;i<b.w/12;i++){
+        const px2 = b.x+4+hsh(seed+i*1.9)*(b.w-8);
+        ctx.beginPath(); ctx.ellipse(px2, y+7+hsh(seed+i*3.3)*5, 5, 2.2, 0, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(255,255,255,.95)';    // sparkle
+      for(let i=0;i<b.w/16;i++){
+        const tw = 0.5+0.5*Math.sin(perf/300+i*2.1);
+        if(tw>0.75) ctx.fillRect(b.x+5+hsh(seed+i*5.1)*(b.w-10), y+3+hsh(seed+i*7.3)*8, 2, 2);
+      }
+      continue;
+    }
+    if(b.t==='ice'){
+      const g2 = ctx.createLinearGradient(0,y,0,y+b.h);
+      g2.addColorStop(0,'rgba(206,240,255,.95)'); g2.addColorStop(1,'rgba(120,180,215,.95)');
+      ctx.fillStyle = g2; ctx.fillRect(b.x, y, b.w, b.h);
+      ctx.save(); ctx.beginPath(); ctx.rect(b.x,y,b.w,b.h); ctx.clip();
+      ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 1.2;
+      for(let i=0;i<b.w/18;i++){                  // cracks
+        const cx0 = b.x+hsh(seed+i*2.7)*b.w, cy0 = y+2+hsh(seed+i*4.3)*(b.h-4);
+        ctx.beginPath(); ctx.moveTo(cx0, cy0);
+        ctx.lineTo(cx0+6+hsh(seed+i)*10, cy0+3);
+        ctx.lineTo(cx0+2+hsh(seed+i*1.3)*14, cy0+8);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,255,255,.55)';    // glare band
+      ctx.fillRect(b.x, y+1, b.w, 2.5);
+      ctx.restore();
+      continue;
+    }
     if(b.t==='tg'){
       ctx.fillStyle = '#1d5e26'; ctx.fillRect(b.x, y+4, b.w, b.h-4);
       ctx.lineCap = 'round';
@@ -826,11 +896,12 @@ function drawBlocks(){
       const x1 = b.x, y1 = b.dir>0 ? yBot-3 : yTop-3;
       const x2 = b.x+b.w, y2 = b.dir>0 ? yTop-3 : yBot-3;
       ctx.lineCap = 'butt';
-      ctx.strokeStyle = '#2c8a33'; ctx.lineWidth = 8;
+      const alpine = b.y < SNOWLINE;
+      ctx.strokeStyle = alpine ? '#cfe0f2' : '#2c8a33'; ctx.lineWidth = 8;
       ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-      ctx.strokeStyle = '#46bd45'; ctx.lineWidth = 4;
+      ctx.strokeStyle = alpine ? '#e8f2fb' : '#46bd45'; ctx.lineWidth = 4;
       ctx.beginPath(); ctx.moveTo(x1,y1-1); ctx.lineTo(x2,y2-1); ctx.stroke();
-      ctx.strokeStyle = '#74e26d'; ctx.lineWidth = 1.5;
+      ctx.strokeStyle = alpine ? '#ffffff' : '#74e26d'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(x1,y1-3); ctx.lineTo(x2,y2-3); ctx.stroke();
       continue;
     }
@@ -853,7 +924,7 @@ function drawBlocks(){
       ctx.fillStyle = dg; ctx.fillRect(b.x, y+40, b.w, b.h-40);
       ctx.restore();
     }
-    if(!b.base) grassCap(b.x, y, b.w, seed);
+    if(!b.base) (b.y < SNOWLINE ? snowCap : grassCap)(b.x, y, b.w, seed);
   }
 }
 
@@ -894,30 +965,63 @@ function drawTrees(){
     ctx.moveTo(t.x-2.5*s, y+1); ctx.lineTo(t.x+2.5*s, y+1);
     ctx.lineTo(t.x+1.4*s+sway*0.3, y-16*s); ctx.lineTo(t.x-1.4*s+sway*0.3, y-16*s);
     ctx.closePath(); ctx.fill();
+    const snowy = t.y < SNOWLINE;
     if(t.pine){
       for(let i=0;i<3;i++){
         const cy = y - 12*s - i*11*s, wd = (17-i*4)*s, ht = 16*s;
         const off = sway*(0.4+i*0.28);
-        ctx.fillStyle = ['#1e6b2c','#248034','#2b923c'][i];
+        ctx.fillStyle = snowy ? ['#17532a','#1c6531','#22773a'][i] : ['#1e6b2c','#248034','#2b923c'][i];
         ctx.beginPath();
         ctx.moveTo(t.x+off, cy-ht); ctx.lineTo(t.x+wd+off*0.6, cy); ctx.lineTo(t.x-wd+off*0.6, cy);
         ctx.closePath(); ctx.fill();
+        if(snowy){                                // snow settled on each tier
+          ctx.fillStyle = '#eef6ff';
+          ctx.beginPath();
+          ctx.moveTo(t.x+off, cy-ht);
+          ctx.lineTo(t.x+wd*0.62+off*0.6, cy-ht*0.30);
+          ctx.lineTo(t.x+wd*0.30+off*0.6, cy-ht*0.34);
+          ctx.lineTo(t.x-wd*0.20+off*0.6, cy-ht*0.16);
+          ctx.lineTo(t.x-wd*0.66+off*0.6, cy-ht*0.30);
+          ctx.closePath(); ctx.fill();
+        }
       }
-      ctx.fillStyle = 'rgba(120,225,120,.30)';    // sunlit side
-      ctx.beginPath();
-      ctx.moveTo(t.x+sway, y-45*s); ctx.lineTo(t.x-4*s+sway, y-30*s); ctx.lineTo(t.x+sway, y-30*s);
-      ctx.closePath(); ctx.fill();
+      if(!snowy){
+        ctx.fillStyle = 'rgba(120,225,120,.30)';  // sunlit side
+        ctx.beginPath();
+        ctx.moveTo(t.x+sway, y-45*s); ctx.lineTo(t.x-4*s+sway, y-30*s); ctx.lineTo(t.x+sway, y-30*s);
+        ctx.closePath(); ctx.fill();
+      }
     } else {
       const cy = y - 26*s, ox = sway;
-      ctx.fillStyle = '#256e2a';
+      ctx.fillStyle = snowy ? '#1c5722' : '#256e2a';
       ctx.beginPath();
       ctx.arc(t.x-8*s+ox, cy+4*s, 9*s, 0, 7); ctx.arc(t.x+8*s+ox, cy+3*s, 8.5*s, 0, 7);
       ctx.arc(t.x+ox, cy-5*s, 11*s, 0, 7); ctx.fill();
-      ctx.fillStyle = '#33903a';
+      ctx.fillStyle = snowy ? '#27702e' : '#33903a';
       ctx.beginPath(); ctx.arc(t.x-2*s+ox, cy-4*s, 8*s, 0, 7); ctx.fill();
-      ctx.fillStyle = 'rgba(140,235,130,.45)';
-      ctx.beginPath(); ctx.arc(t.x-5*s+ox, cy-8*s, 4.5*s, 0, 7); ctx.fill();
+      ctx.fillStyle = snowy ? 'rgba(238,246,255,.95)' : 'rgba(140,235,130,.45)';
+      ctx.beginPath(); ctx.arc(t.x-5*s+ox, cy-9*s, 5.5*s, 0, 7);
+      if(snowy){ ctx.arc(t.x+4*s+ox, cy-7*s, 4*s, 0, 7); }
+      ctx.fill();
     }
+  }
+}
+
+// Falling snow in the alpine band. Weather, not terrain — it drifts with the local
+// wind so the two effects agree with each other.
+function drawSnowfall(){
+  const a = Math.max(0, Math.min(1, (SNOWLINE + 250 - cam)/800));
+  if(a <= 0) return;
+  const drift = windAt(240, cam + VH/2) * 900;
+  for(let i=0;i<120;i++){
+    const s1 = hsh(i*1.7), s2 = hsh(i*3.9), s3 = hsh(i*5.3);
+    const fall = 26 + s2*54;
+    const sy = ((s1*(VH+80) + perf*fall/1000) % (VH+80)) - 40;
+    const sx = VX0 + (((s2*VWF) + Math.sin(perf/1400 + i)*16 + perf*drift/9000
+                       - cam*0.12) % VWF + VWF*2) % VWF;
+    const r = 1 + s3*2.2;
+    ctx.fillStyle = 'rgba(255,255,255,'+(a*(0.35+s3*0.5)).toFixed(2)+')';
+    ctx.beginPath(); ctx.arc(sx, sy, r, 0, 7); ctx.fill();
   }
 }
 
@@ -1223,38 +1327,113 @@ $('pClose').onclick = () => closePanel();
 $('pAgain').onclick = () => { closePanel(); if(done) reset(); };
 $('pShare').onclick = () => shareImage();
 
-// Builds a share card: a clean frame of the game with a caption bar underneath.
+// Draws the shareable badge: a square medal card, not a screenshot.
+function buildBadge(){
+  const S = 1080, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d'), u = S/100;
+  const F = (sz,b) => (b?'bold ':'') + (u*sz) + 'px ui-monospace,Menlo,Consolas,monospace';
+
+  // backdrop: alpine night sky
+  const bg = g.createLinearGradient(0,0,0,S);
+  bg.addColorStop(0,'#0a1030'); bg.addColorStop(0.55,'#152a5c'); bg.addColorStop(1,'#0b1224');
+  g.fillStyle = bg; g.fillRect(0,0,S,S);
+  for(let i=0;i<90;i++){                            // stars
+    const sx = hsh(i*1.7)*S, sy = hsh(i*3.1)*S*0.6;
+    g.fillStyle = 'rgba(255,255,255,'+(0.25+hsh(i*5.3)*0.6).toFixed(2)+')';
+    g.fillRect(sx, sy, 2.5, 2.5);
+  }
+  g.fillStyle = 'rgba(70,100,150,.45)';             // peaks
+  g.beginPath(); g.moveTo(0,S);
+  for(let x=0;x<=S;x+=S/26){
+    g.lineTo(x, S*0.66 - hsh(x*0.02)*S*0.16 - hsh(x*0.07)*S*0.07);
+  }
+  g.lineTo(S,S); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(228,240,255,.9)';             // snow caps on the peaks
+  for(let x=0;x<=S;x+=S/26){
+    const py = S*0.66 - hsh(x*0.02)*S*0.16 - hsh(x*0.07)*S*0.07;
+    g.beginPath(); g.moveTo(x-8, py+11); g.lineTo(x, py-2); g.lineTo(x+8, py+11);
+    g.closePath(); g.fill();
+  }
+  g.fillStyle = 'rgba(11,18,36,.72)'; g.fillRect(0,0,S,S);
+
+  // gold ring
+  const cx = S/2, cy = S*0.44, rad = S*0.23;
+  g.strokeStyle = 'rgba(255,210,63,.28)'; g.lineWidth = u*4.4;
+  g.beginPath(); g.arc(cx, cy, rad+u*3.4, 0, 7); g.stroke();
+  const ring = g.createLinearGradient(cx-rad, cy-rad, cx+rad, cy+rad);
+  ring.addColorStop(0,'#ffe89a'); ring.addColorStop(0.5,'#ffd23f'); ring.addColorStop(1,'#b8891c');
+  g.strokeStyle = ring; g.lineWidth = u*2.6;
+  g.beginPath(); g.arc(cx, cy, rad, 0, 7); g.stroke();
+  const disc = g.createLinearGradient(0, cy-rad, 0, cy+rad);
+  disc.addColorStop(0,'#16224a'); disc.addColorStop(1,'#0a1130');
+  g.fillStyle = disc; g.beginPath(); g.arc(cx, cy, rad-u*1.4, 0, 7); g.fill();
+  for(let i=0;i<44;i++){                            // notched rim
+    const an = i/44*Math.PI*2;
+    g.fillStyle = i%2 ? 'rgba(255,210,63,.5)' : 'rgba(255,210,63,.16)';
+    g.beginPath();
+    g.arc(cx+Math.cos(an)*(rad+u*3.4), cy+Math.sin(an)*(rad+u*3.4), u*0.7, 0, 7);
+    g.fill();
+  }
+
+  // flag + ball emblem, sitting in the upper half of the disc
+  const ex = cx, ey = cy - u*11.5;
+  g.strokeStyle = '#f2f6ff'; g.lineWidth = u*0.8; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(ex+u*3.5, ey-u*7); g.lineTo(ex+u*3.5, ey+u*4); g.stroke();
+  g.fillStyle = '#ff3b30';
+  g.beginPath(); g.moveTo(ex+u*3.5, ey-u*7);
+  g.quadraticCurveTo(ex+u*9, ey-u*6, ex+u*13.5, ey-u*4.4);
+  g.quadraticCurveTo(ex+u*9, ey-u*3, ex+u*3.5, ey-u*2.2);
+  g.closePath(); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.18)';            // cup
+  g.beginPath(); g.ellipse(ex+u*3.5, ey+u*4.3, u*4.4, u*1.5, 0, 0, 7); g.fill();
+  g.fillStyle = '#ffffff';                          // ball
+  g.beginPath(); g.arc(ex-u*7, ey+u*2, u*3.4, 0, 7); g.fill();
+  g.fillStyle = 'rgba(20,30,55,.35)';
+  for(let i=0;i<4;i++){
+    const an = 0.7+i*1.5;
+    g.beginPath(); g.arc(ex-u*7+Math.cos(an)*u*1.4, ey+u*2+Math.sin(an)*u*1.4, u*0.45, 0, 7); g.fill();
+  }
+
+  // the score, big, clear of the emblem
+  g.textAlign = 'center';
+  g.fillStyle = '#ffd23f'; g.font = F(16,true);
+  g.fillText(String(total), cx, cy + u*9);
+  g.fillStyle = '#cdd9f0'; g.font = F(3.8,true);
+  g.fillText('STROKES', cx, cy + u*16.5);
+
+  // title
+  g.fillStyle = '#f2f6ff'; g.font = F(7.6,true);
+  g.fillText('CLIFF GOLF', cx, u*13.5);
+  g.fillStyle = '#8fa3c8'; g.font = F(3.2,true);
+  g.fillText(HOLES.length + ' HOLES · SUMMIT REACHED', cx, u*19.5);
+
+  // name and footer, below the medal
+  const who = (savedName() || '').trim();
+  if(who){
+    g.fillStyle = '#ffffff'; g.font = F(6,true);
+    g.fillText(who, cx, S - u*22);
+  }
+  if(lastRank === 0){                               // best run on this device
+    g.fillStyle = '#ffd23f'; g.font = F(3.4,true);
+    g.fillText('◆ PERSONAL BEST ◆', cx, S - u*(who ? 15 : 20));
+  }
+  g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(u*24, S-u*10.5); g.lineTo(S-u*24, S-u*10.5); g.stroke();
+  g.fillStyle = '#7f93b8'; g.font = F(3,true);
+  g.fillText('abandonedBaby GAMES', cx, S - u*5);
+  return c;
+}
+
+// Builds the shareable badge and hands it to the share sheet, or saves it.
 async function shareImage(){
   const note = $('pNote');
   try{
-    const wasDone = done, wasPanel = panelUp;
-    done = false; drawFrame();                  // one clean frame, no dim overlay
-    done = wasDone;
-
-    const bar = Math.round(cv.width*0.13);
-    const shot = document.createElement('canvas');
-    shot.width = cv.width; shot.height = cv.height + bar;
-    const g = shot.getContext('2d');
-    g.drawImage(cv, 0, 0);
-    const grd = g.createLinearGradient(0, cv.height, 0, shot.height);
-    grd.addColorStop(0,'#111c3a'); grd.addColorStop(1,'#0b1224');
-    g.fillStyle = grd; g.fillRect(0, cv.height, shot.width, bar);
-    g.fillStyle = '#2b3b66'; g.fillRect(0, cv.height, shot.width, Math.max(2, bar*0.02));
-    const u = shot.width/100;
-    g.textAlign = 'left'; g.fillStyle = '#ffd23f';
-    g.font = 'bold '+(u*5.4)+'px ui-monospace,Menlo,Consolas,monospace';
-    g.fillText('CLIFF GOLF', u*5, cv.height + bar*0.45);
-    g.fillStyle = '#cdd9f0'; g.font = (u*3.4)+'px ui-monospace,Menlo,Consolas,monospace';
-    g.fillText(wasDone ? total+' strokes · '+HOLES.length+' holes'
-                       : 'hole '+Math.min(hole+1,HOLES.length)+' of '+HOLES.length,
-               u*5, cv.height + bar*0.75);
-    g.textAlign = 'right'; g.fillStyle = '#8fa3c8';
-    g.font = 'bold '+(u*2.9)+'px ui-monospace,Menlo,Consolas,monospace';
-    g.fillText('abandonedBaby GAMES', shot.width - u*5, cv.height + bar*0.62);
-
+    const shot = buildBadge();
+    const wasDone = done;
     const blob = await new Promise(r => shot.toBlob(r, 'image/png'));
     if(!blob){ note.textContent = 'Could not build the image.'; return; }
-    const file = new File([blob], 'cliff-golf.png', {type:'image/png'});
+    const file = new File([blob], 'cliff-golf-badge.png', {type:'image/png'});
 
     if(navigator.canShare && navigator.canShare({files:[file]})){
       try{
@@ -1269,9 +1448,9 @@ async function shareImage(){
     }
     const url = URL.createObjectURL(blob);      // fallback: save the PNG
     const a = document.createElement('a');
-    a.href = url; a.download = 'cliff-golf.png'; a.click();
+    a.href = url; a.download = 'cliff-golf-badge.png'; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    note.textContent = 'Image saved to your downloads.';
+    note.textContent = 'Badge saved to your downloads.';
   }catch(e){
     note.textContent = 'Share failed: ' + e.message;
   }
@@ -1305,7 +1484,7 @@ function drawFrame(){
   for(let i=0;i<HOLES.length;i++){
     if(i===hole || (i>hole && i<hole+3)) drawFlag(HOLES[i], i===hole);
   }
-  drawBirds(); drawBall(); drawAim(); vignette();
+  drawBirds(); drawBall(); drawAim(); drawSnowfall(); vignette();
 }
 function loop(t){
   perf = t||0;
