@@ -20,10 +20,13 @@
 <script>
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const VW = 480, VH = 720;
-const WW = 480, WH = 4400;          // world size
+// WH runs well below the floor so the camera can always scroll far enough past the
+// tee to leave a full pull-length of screen under the ball
+const WW = 480, WH = 4720;          // world size
 const GRAV = 0.34, AIRDRAG = 0.999;
 const R = 8;                         // ball radius
-const MAXPULL = 190, POWER = 0.098;
+// shorter pull, proportionally stronger — same 18.6 max launch speed, less mouse travel
+const MAXPULL = 150, POWER = 0.124;
 
 // ---------------------------------------------------------------- level data
 // block: [x, yTop, w, h, type]  type: g=grass/rock  s=sand  w=water  r=rock wall
@@ -33,8 +36,8 @@ const s=(x,y,w,h)=>B.push({x,y,w,h:h||14,t:'s'});
 const w=(x,y,w2,h)=>B.push({x,y,w:w2,h:h||14,t:'w'});
 
 // ground
-g(0,4360,480,40);
-g(-30,0,30,4400); g(480,0,30,4400);            // invisible side walls
+g(0,4360,480,360);                             // floor + deep bedrock below it
+g(-30,0,30,4720); g(480,0,30,4720);            // invisible side walls
 
 // tier 1
 g(40,4180,110); g(230,4120,90); s(230,4106,90);
@@ -208,7 +211,10 @@ reset();
 function toWorld(e){
   const r = cv.getBoundingClientRect();
   const p = e.touches ? e.touches[0] : e;
-  return { x:(p.clientX-r.left)*(VW/r.width), y:(p.clientY-r.top)*(VH/r.height)+cam };
+  // clamped to the canvas so a drag that runs past the screen edge still reads cleanly
+  const x = Math.max(-60, Math.min(VW+60, (p.clientX-r.left)*(VW/r.width)));
+  const y = Math.max(0, Math.min(VH, (p.clientY-r.top)*(VH/r.height)));
+  return { x, y: y+cam };
 }
 function down(e){
   e.preventDefault();
@@ -338,6 +344,8 @@ function tugCam(){
   const want = ball.y - VH*0.62 + camPeek;
   cam += (want-cam)*0.11;
   cam = Math.max(-40, Math.min(WH-VH, cam));
+  // never let the ball sit so low that a full-power pull runs off the bottom of the canvas
+  if(aiming || ball.rest) cam = Math.max(cam, ball.y - VH + MAXPULL + 45);
 }
 
 // ------------------------------------------------------------------ drawing
