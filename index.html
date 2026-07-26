@@ -30,12 +30,71 @@
     pointer-events:none;text-shadow:0 1px 3px #000a}
   #brand b{color:#9ab0d8;font-weight:700}
   @media (max-width:560px){ #hint{font-size:10px} #brand{font-size:9px} }
+
+  /* end-of-run / leaderboard panel */
+  #panel{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom));
+    z-index:5}
+  #panel.on{display:flex}
+  #panel .card{position:relative;width:min(380px,100%);max-height:100%;overflow-y:auto;
+    background:linear-gradient(180deg,#111c3a,#0b1224);border:1px solid #2b3b66;
+    border-radius:14px;padding:20px 18px 14px;box-shadow:0 18px 60px #000c;
+    -webkit-overflow-scrolling:touch}
+  #panel h1{margin:0 0 2px;font-size:20px;letter-spacing:.06em;color:#ffd23f;text-align:center}
+  #panel .sub{margin:0 0 14px;text-align:center;font-size:13px;color:#cdd9f0}
+  #panel .sub b{color:#fff;font-size:17px}
+  #entry{display:flex;gap:8px;margin-bottom:12px}
+  #pName{flex:1;min-width:0;background:#0a1226;border:1px solid #33477a;
+    color:#e8eefc;border-radius:8px;padding:10px;font:inherit;font-size:14px;
+    text-transform:uppercase;letter-spacing:.06em}
+  #pName:focus{outline:2px solid #ffd23f;outline-offset:1px}
+  #panel button{background:#1d2c52;border:1px solid #3a4f85;color:#e8eefc;border-radius:8px;
+    padding:10px 12px;font:inherit;font-size:12px;letter-spacing:.06em;cursor:pointer;
+    white-space:nowrap}
+  #panel button:hover{background:#273a6b}
+  #panel button:disabled{opacity:.45;cursor:default}
+  #pSave{background:#2f7d3a;border-color:#47a352}
+  #pSave:hover:not(:disabled){background:#379145}
+  #pBoard{list-style:none;margin:0 0 14px;padding:0;font-size:13px}
+  #pBoard li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px}
+  #pBoard li:nth-child(odd){background:#ffffff0b}
+  #pBoard li.me{background:#ffd23f22;outline:1px solid #ffd23f66}
+  #pBoard .rk{width:22px;color:#8fa3c8;text-align:right}
+  #pBoard .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #pBoard .sc{color:#ffd23f;font-weight:700}
+  #pBoard .empty{color:#8fa3c8;text-align:center;display:block;padding:10px}
+  #panel .row{display:flex;gap:8px}
+  #panel .row button{flex:1}
+  #panel .bl{margin-top:14px;text-align:center;font-size:9px;letter-spacing:.14em;color:#6c7fa4}
+  #pClose{position:absolute;top:8px;right:8px;padding:2px 9px !important;font-size:16px !important;
+    background:transparent !important;border-color:transparent !important;color:#8fa3c8 !important}
+  #pNote{text-align:center;font-size:10px;color:#8fa3c8;margin:8px 0 0;min-height:12px}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="hint">drag DOWN from the ball to aim &amp; power up — release to launch · mouse wheel to peek · R = reset shot · mind the birds &amp; wind</div>
 <div id="brand"><b>abandonedBaby GAMES</b> · © 2026</div>
+
+<div id="panel" role="dialog" aria-modal="true" aria-labelledby="pTitle">
+  <div class="card">
+    <button id="pClose" aria-label="Close">×</button>
+    <h1 id="pTitle">SUMMIT REACHED</h1>
+    <p class="sub" id="pSub"></p>
+    <div id="entry">
+      <input id="pName" maxlength="12" placeholder="YOUR NAME" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" aria-label="Your name">
+      <button id="pSave">SAVE</button>
+    </div>
+    <ol id="pBoard"></ol>
+    <div class="row">
+      <button id="pShare">SHARE IMAGE</button>
+      <button id="pAgain">PLAY AGAIN</button>
+    </div>
+    <p id="pNote"></p>
+    <div class="bl">abandonedBaby GAMES</div>
+  </div>
+</div>
 <script>
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 // VW is the fixed width of the play column in world units — level design depends on
@@ -168,6 +227,34 @@ const HOLES = [
 
 const TEE = {x: 60, y: 4360 - R};
 
+// ------------------------------------------------------------- leaderboard
+// Local to this browser (localStorage). It is golf: FEWER strokes wins, so the
+// board sorts ascending. Only completed 19-hole runs qualify — otherwise an
+// abandoned run with 3 strokes would sit at the top forever.
+const LS_SCORES = 'cliffgolf.scores.v1', LS_NAME = 'cliffgolf.name', BOARD_MAX = 10;
+function storageOK(){
+  try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); return true; }
+  catch(e){ return false; }                 // private mode, or file:// in some browsers
+}
+function loadScores(){
+  try{
+    const a = JSON.parse(localStorage.getItem(LS_SCORES) || '[]');
+    return Array.isArray(a) ? a.filter(r => r && typeof r.s === 'number' && isFinite(r.s)) : [];
+  }catch(e){ return []; }
+}
+function addScore(name, strokes){
+  const a = loadScores();
+  const clean = String(name||'').trim().toUpperCase().replace(/\s+/g,' ').slice(0,12);
+  const row = {n: clean || 'PLAYER', s:strokes, d:Date.now()};
+  a.push(row);
+  a.sort((x,y) => x.s - y.s || x.d - y.d);  // fewest strokes first, earliest breaks ties
+  const top = a.slice(0, BOARD_MAX);
+  try{ localStorage.setItem(LS_SCORES, JSON.stringify(top)); }catch(e){}
+  try{ localStorage.setItem(LS_NAME, row.n); }catch(e){}
+  return {top, row};
+}
+function savedName(){ try{ return localStorage.getItem(LS_NAME) || ''; }catch(e){ return ''; } }
+
 // -------------------------------------------------------------------- wind
 // Bands of moving air sitting in the gaps between tiers. They push the ball
 // sideways while it is in flight only — a resting ball is never moved. Strength
@@ -293,10 +380,18 @@ function drawBirds(){
 let ball, hole, strokes, total, cam, camPeek, aiming, aimFrom, mouse, done, msg, msgT;
 let restartArm = 0;                  // declared here: reset() runs before the input section
 let introT = 170;                    // studio card frames remaining on first load
+let panelUp = false, scoreSaved = false, lastRank = -1;   // same reason — reset() touches these
+// hoisted + no helpers, so reset() can call it safely during load
+function hidePanel(){
+  const p = document.getElementById('panel');
+  if(p) p.classList.remove('on');
+  panelUp = false;
+}
 
 function reset(){
   hole = 0; strokes = 0; total = 0; done = false; camPeek = 0; msg=''; msgT=0;
   restartArm = 0; aiming = false;
+  scoreSaved = false; lastRank = -1; hidePanel();
   resetBirds();
   respawn(TEE.x, TEE.y);
   cam = ball.y - VH*0.65;
@@ -326,21 +421,23 @@ function toScreen(e){
 // Restart button, top-right of the HUD bar. Needs a second tap to confirm so a
 // misplaced touch can never wipe a run in progress.
 function btnRect(){ return {x: VX0+VWF-40, y: 4, w: 34, h: 26}; }
-function inBtn(s){
-  const b = btnRect();
+function boardRect(){ return {x: VX0+VWF-80, y: 4, w: 34, h: 26}; }
+function hits(s, b){
   return s.x > b.x-6 && s.x < b.x+b.w+6 && s.y > b.y-4 && s.y < b.y+b.h+6;
 }
+function inBtn(s){ return hits(s, btnRect()); }
 function down(e){
   e.preventDefault();
   introT = 0;                                      // any touch skips the studio card
   const s = toScreen(e);
+  if(hits(s, boardRect())){ restartArm = 0; openPanel(false); return; }
   if(inBtn(s)){
     if(restartArm > 0){ restartArm = 0; reset(); flash('RESTARTED'); }
     else { restartArm = 180; flash('TAP AGAIN TO RESTART'); }
     return;
   }
   restartArm = 0;                                  // tapping elsewhere cancels
-  if(done) { reset(); return; }
+  if(done) return;                                 // end panel owns the finished state
   const m = toWorld(e);
   if(!atRest()) return;
   if(Math.hypot(m.x-ball.x, m.y-ball.y) < 42){ aiming = true; aimFrom = m; mouse = m; }
@@ -988,7 +1085,15 @@ function hud(){
   ctx.fillText('HOLE ' + Math.min(hole+1,HOLES.length) + '/' + HOLES.length, L+12, 21);
   ctx.fillText('STROKES ' + strokes, L+130, 21);
   ctx.textAlign = 'right';
-  ctx.fillText('TOTAL ' + total, Rt-52, 21);
+  ctx.fillText('TOTAL ' + total, Rt-94, 21);
+  // leaderboard button — a little trophy/podium
+  const bb = boardRect(), bcx = bb.x+bb.w/2, bcy = bb.y+bb.h/2;
+  ctx.fillStyle = 'rgba(255,255,255,.12)';
+  ctx.beginPath(); ctx.arc(bcx, bcy, 13, 0, 7); ctx.fill();
+  ctx.fillStyle = '#ffd23f';
+  ctx.fillRect(bcx-7, bcy+1, 4, 5); ctx.fillRect(bcx-2.5, bcy-4, 5, 10);
+  ctx.fillRect(bcx+3, bcy-1, 4, 7);
+  ctx.fillStyle = '#cfe0ff'; ctx.fillRect(bcx-8, bcy+6, 16, 2);
   // restart button
   const b = btnRect(), armed = restartArm > 0;
   ctx.fillStyle = armed ? 'rgba(255,90,70,.92)' : 'rgba(255,255,255,.12)';
@@ -1032,17 +1137,8 @@ function hud(){
     ctx.fillStyle = '#ffd23f'; ctx.fillText(msg, C, 118);
     ctx.globalAlpha = 1; msgT--;
   }
-  if(done){
-    ctx.fillStyle = 'rgba(5,8,20,.86)'; ctx.fillRect(VX0,0,VWF,VH);
-    ctx.textAlign = 'center'; ctx.fillStyle = '#ffd23f';
-    ctx.font = 'bold 30px ui-monospace,monospace';
-    ctx.fillText('SUMMIT REACHED', C, VH/2-46);
-    ctx.fillStyle = '#e8eefc'; ctx.font = 'bold 18px ui-monospace,monospace';
-    ctx.fillText('Total strokes: ' + total, C, VH/2-10);
-    ctx.font = '14px ui-monospace,monospace';
-    ctx.fillText('click to play again', C, VH/2+24);
-    wordmark(C, VH/2+92, 1);
-  }
+  // the finished-run content lives in the DOM panel; the canvas just dims behind it
+  if(done){ ctx.fillStyle = 'rgba(5,8,20,.7)'; ctx.fillRect(VX0,0,VWF,VH); }
   ctx.textAlign = 'left';
 }
 
@@ -1071,6 +1167,116 @@ function wordmark(cx, cy, a){
   ctx.textAlign = 'left';
 }
 
+// ------------------------------------------------------------- panel + share
+const $ = id => document.getElementById(id);
+
+function renderBoard(){
+  const rows = loadScores(), el = $('pBoard');
+  el.innerHTML = '';
+  if(!rows.length){
+    el.innerHTML = '<span class="empty">' +
+      (storageOK() ? 'No scores yet — finish a run to get on the board.'
+                   : 'Scores can\'t be saved in this browser mode.') + '</span>';
+    return;
+  }
+  rows.forEach((r,i) => {
+    const li = document.createElement('li');
+    if(i === lastRank) li.className = 'me';
+    const rk = document.createElement('span'); rk.className = 'rk'; rk.textContent = (i+1)+'.';
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = r.n;
+    const sc = document.createElement('span'); sc.className = 'sc'; sc.textContent = r.s;
+    li.append(rk, nm, sc);                      // textContent, so names can't inject markup
+    el.append(li);
+  });
+}
+function openPanel(isEnd){
+  panelUp = true;
+  const finished = !!isEnd;
+  $('pTitle').textContent = finished ? 'SUMMIT REACHED' : 'HIGH SCORES';
+  $('pSub').innerHTML = finished
+    ? 'Total strokes: <b>'+total+'</b> over '+HOLES.length+' holes'
+    : 'Fewest strokes wins · this device';
+  $('entry').style.display = finished ? 'flex' : 'none';
+  $('pAgain').textContent = finished ? 'PLAY AGAIN' : 'CLOSE';
+  $('pName').value = savedName();
+  $('pSave').disabled = false; $('pSave').textContent = 'SAVE';
+  $('pNote').textContent = '';
+  renderBoard();
+  $('panel').classList.add('on');
+  if(finished && storageOK()) setTimeout(() => $('pName').focus(), 60);
+}
+function closePanel(){ hidePanel(); }
+
+$('pSave').onclick = () => {
+  if(scoreSaved || !done) return;
+  if(!storageOK()){ $('pNote').textContent = 'Storage unavailable — score not saved.'; return; }
+  const {top, row} = addScore($('pName').value, total);   // addScore normalises the name
+  lastRank = top.findIndex(r => r.d === row.d);
+  scoreSaved = true;
+  $('pSave').disabled = true; $('pSave').textContent = 'SAVED';
+  $('pNote').textContent = lastRank >= 0 ? 'Placed #'+(lastRank+1)+' on the board.'
+                                         : 'Not in the top '+BOARD_MAX+' this time.';
+  renderBoard();
+};
+$('pName').addEventListener('keydown', e => { if(e.key === 'Enter') $('pSave').click(); });
+$('pClose').onclick = () => closePanel();
+$('pAgain').onclick = () => { closePanel(); if(done) reset(); };
+$('pShare').onclick = () => shareImage();
+
+// Builds a share card: a clean frame of the game with a caption bar underneath.
+async function shareImage(){
+  const note = $('pNote');
+  try{
+    const wasDone = done, wasPanel = panelUp;
+    done = false; drawFrame();                  // one clean frame, no dim overlay
+    done = wasDone;
+
+    const bar = Math.round(cv.width*0.13);
+    const shot = document.createElement('canvas');
+    shot.width = cv.width; shot.height = cv.height + bar;
+    const g = shot.getContext('2d');
+    g.drawImage(cv, 0, 0);
+    const grd = g.createLinearGradient(0, cv.height, 0, shot.height);
+    grd.addColorStop(0,'#111c3a'); grd.addColorStop(1,'#0b1224');
+    g.fillStyle = grd; g.fillRect(0, cv.height, shot.width, bar);
+    g.fillStyle = '#2b3b66'; g.fillRect(0, cv.height, shot.width, Math.max(2, bar*0.02));
+    const u = shot.width/100;
+    g.textAlign = 'left'; g.fillStyle = '#ffd23f';
+    g.font = 'bold '+(u*5.4)+'px ui-monospace,Menlo,Consolas,monospace';
+    g.fillText('CLIFF GOLF', u*5, cv.height + bar*0.45);
+    g.fillStyle = '#cdd9f0'; g.font = (u*3.4)+'px ui-monospace,Menlo,Consolas,monospace';
+    g.fillText(wasDone ? total+' strokes · '+HOLES.length+' holes'
+                       : 'hole '+Math.min(hole+1,HOLES.length)+' of '+HOLES.length,
+               u*5, cv.height + bar*0.75);
+    g.textAlign = 'right'; g.fillStyle = '#8fa3c8';
+    g.font = 'bold '+(u*2.9)+'px ui-monospace,Menlo,Consolas,monospace';
+    g.fillText('abandonedBaby GAMES', shot.width - u*5, cv.height + bar*0.62);
+
+    const blob = await new Promise(r => shot.toBlob(r, 'image/png'));
+    if(!blob){ note.textContent = 'Could not build the image.'; return; }
+    const file = new File([blob], 'cliff-golf.png', {type:'image/png'});
+
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      try{
+        await navigator.share({files:[file], title:'Cliff Golf',
+          text: wasDone ? 'I climbed Cliff Golf in '+total+' strokes.' : 'Climbing Cliff Golf.'});
+        note.textContent = 'Shared.';
+        return;
+      }catch(err){
+        if(err && err.name === 'AbortError'){ note.textContent = ''; return; }
+        // otherwise fall through to download
+      }
+    }
+    const url = URL.createObjectURL(blob);      // fallback: save the PNG
+    const a = document.createElement('a');
+    a.href = url; a.download = 'cliff-golf.png'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    note.textContent = 'Image saved to your downloads.';
+  }catch(e){
+    note.textContent = 'Share failed: ' + e.message;
+  }
+}
+
 // studio card on load — fades itself out, and any touch skips it
 function intro(){
   if(introT <= 0) return;
@@ -1094,14 +1300,18 @@ function vignette(){
 }
 
 let perf = 0;
-function loop(t){
-  perf = t||0;
-  step();
+function drawFrame(){
   sky(); drawWinds(); drawFalls(); drawBlocks(); drawTrees();
   for(let i=0;i<HOLES.length;i++){
     if(i===hole || (i>hole && i<hole+3)) drawFlag(HOLES[i], i===hole);
   }
-  drawBirds(); drawBall(); drawAim(); vignette(); hud(); intro();
+  drawBirds(); drawBall(); drawAim(); vignette();
+}
+function loop(t){
+  perf = t||0;
+  step();
+  drawFrame(); hud(); intro();
+  if(done && !panelUp) openPanel(true);       // run finished — show the end panel
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
