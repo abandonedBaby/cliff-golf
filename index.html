@@ -29,56 +29,106 @@ const R = 8;                         // ball radius
 const MAXPULL = 150, POWER = 0.124;
 
 // ---------------------------------------------------------------- level data
-// block: [x, yTop, w, h, type]  type: g=grass/rock  s=sand  w=water  r=rock wall
+// types: g=grass/rock  s=sand  w=water  tg=tall grass  r=sloped ramp
 const B = [];
 const g=(x,y,w,h)=>B.push({x,y,w,h:h||18,t:'g'});
-const s=(x,y,w,h)=>B.push({x,y,w,h:h||14,t:'s'});
-const w=(x,y,w2,h)=>B.push({x,y,w:w2,h:h||14,t:'w'});
+
+// A hazard set into a ledge, with the ground wrapping up around both ends so it
+// sits in a walled basin instead of floating on the surface.
+function pit(x,y,w,t){
+  const hh = t==='w' ? 10 : 13;                  // hazard depth
+  B.push({x, y:y-hh, w, h:hh+8, t});             // hazard, sunk into the ledge top
+  B.push({x:x-5, y:y-hh-5, w:5, h:hh+5, t:'g'}); // left lip
+  B.push({x:x+w, y:y-hh-5, w:5, h:hh+5, t:'g'}); // right lip
+}
+// Sloped ramp. dir=+1 rises to the right, dir=-1 falls to the right.
+// Surface runs corner to corner; a solid base sits under the low edge.
+function ramp(x,y,w,h,dir){
+  B.push({x,y,w,h,t:'r',dir});
+  g(x, y+h, w, 12);
+}
 
 // ground
-g(0,4360,480,360);                             // floor + deep bedrock below it
-g(-30,0,30,4720); g(480,0,30,4720);            // invisible side walls
+// Floor overhangs the walls, and the walls run far above the summit — otherwise a
+// big shot off the top tier sails over them and falls outside the world forever.
+g(-60,4360,600,360);                           // floor + deep bedrock below it
+g(-30,-3000,30,7720); g(480,-3000,30,7720);    // invisible side walls
+B[B.length-1].wall = B[B.length-2].wall = true;
 
 // tier 1
-g(40,4180,110); g(230,4120,90); s(230,4106,90);
-g(370,4200,110);
+g(30,4180,150); ramp(180,4140,60,40,1);
+g(240,4140,100); pit(265,4140,60,'s');
+g(380,4200,100);
 // tier 2
-g(0,3960,120); w(0,3946,120);
-g(190,3990,130);
+g(0,3960,130); pit(30,3960,70,'w');
+g(180,3990,140);
 g(390,3930,90);
 // tier 3
-g(60,3760,100); g(250,3720,60); g(360,3790,120); s(360,3776,120);
+g(50,3760,120);
+g(230,3720,70);
+g(350,3790,120); pit(375,3790,70,'tg');
 // tier 4
-g(0,3560,90); g(160,3520,130); w(160,3506,55); g(340,3570,140);
+g(0,3560,90);
+g(160,3520,150); pit(175,3520,55,'w'); ramp(310,3480,60,40,1);
+g(370,3480,90);
 // tier 5
-g(70,3340,120); s(70,3326,120); g(280,3300,80); g(410,3360,70);
+g(60,3340,140); pit(155,3340,40,'s');
+g(270,3300,90);
+g(400,3360,80);
 // tier 6
-g(0,3120,110); g(180,3090,90); g(330,3140,150); w(370,3126,70);
+g(0,3120,110);
+g(170,3090,120);
+g(330,3140,150); pit(360,3140,80,'w');
 // tier 7
-g(50,2900,90); g(210,2860,70); g(340,2910,110); s(340,2896,110);
+g(40,2900,90);
+g(200,2860,110); ramp(310,2820,50,40,1);
+g(340,2910,120); pit(365,2910,70,'s');
 // tier 8
-g(0,2690,120); w(20,2676,80); g(190,2650,110); g(370,2700,110);
+g(0,2690,130); pit(25,2690,80,'w');
+g(190,2650,120);
+g(370,2700,110);
 // tier 9
-g(80,2470,90); g(240,2420,80); g(380,2480,100);
+g(70,2470,100);
+g(230,2420,100); ramp(330,2380,60,40,1);
+g(370,2480,100); pit(390,2480,60,'tg');
 // tier 10
-g(0,2250,100); g(150,2220,80); s(150,2206,80); g(300,2260,80); g(430,2200,50);
+g(0,2250,100);
+g(140,2220,110);
+g(300,2260,90); pit(320,2260,50,'s');
+g(430,2200,50);
 // tier 11
-g(40,2030,80); g(190,1980,70); g(320,2030,140); w(340,2016,100);
+g(30,2030,90);
+g(180,1980,110); ramp(290,1940,60,40,1);
+g(320,2030,150); pit(345,2030,100,'w');
 // tier 12
-g(0,1810,90); g(160,1770,60); g(280,1800,70); g(400,1760,80);
+g(0,1810,90);
+g(150,1770,110);
+g(290,1800,80);
+g(400,1760,80);
 // tier 13
-g(60,1580,80); s(60,1566,80); g(210,1540,70); g(360,1590,110);
+g(50,1580,100); pit(70,1580,60,'s');
+g(200,1540,110); ramp(310,1500,60,40,1);
+g(360,1590,110); pit(380,1590,70,'tg');
 // tier 14
-g(0,1360,90); g(150,1320,70); g(290,1360,60); g(400,1310,80);
+g(0,1360,90);
+g(140,1320,110);
+g(290,1360,70);
+g(400,1310,80);
 // tier 15
-g(50,1130,90); g(220,1090,110); w(220,1076,42); g(370,1140,100);
+g(40,1130,100); ramp(140,1090,60,40,1);
+g(250,1090,120); pit(255,1090,35,'w');
+g(400,1140,80);
 // tier 16
-g(0,900,100); g(170,860,80); g(330,900,120); s(330,886,120);
+g(0,900,100); ramp(100,860,60,40,1);
+g(160,860,110);
+g(330,900,130); pit(355,900,70,'s');
 // tier 17
-g(70,670,90); g(240,630,70); g(390,680,90);
+g(60,670,90); ramp(150,590,60,40,1);
+g(230,630,110);
+g(390,680,90);
 // tier 18 — summit
-g(140,430,200);
-g(190,220,120);
+g(140,430,200); pit(150,430,50,'tg');
+g(190,220,130);
 
 // ------------------------------------------------------------------- holes
 // each hole = cup position (x, groundY) — sink here to advance
@@ -86,7 +136,7 @@ const HOLES = [
   {x: 95, y:4180}, {x:245, y:3990}, {x:110, y:3760}, {x:255, y:3520},
   {x:130, y:3340}, {x:225, y:3090}, {x:245, y:2860}, {x:245, y:2650},
   {x:280, y:2420}, {x:190, y:2220}, {x:225, y:1980}, {x:190, y:1770},
-  {x:245, y:1540}, {x:185, y:1320}, {x:300, y:1090}, {x:210, y: 860},
+  {x:245, y:1540}, {x:185, y:1320}, {x:330, y:1090}, {x:210, y: 860},
   {x:275, y: 630}, {x:240, y: 430}, {x:250, y: 220},
 ];
 
@@ -268,19 +318,30 @@ function step(){
   }
   ball.spin += ball.vx*0.06;
 
-  if(Math.hypot(ball.vx,ball.vy) < 0.34 && onGround()){
-    ball.vx = ball.vy = 0; ball.rest = true;
+  // settle — the slow-frame counter is a backstop so a ball nudging along a slope
+  // or wedged in a basin can never leave the player unable to take a shot
+  const sp = Math.hypot(ball.vx, ball.vy);
+  ball.slow = sp < 0.5 ? (ball.slow||0)+1 : 0;
+  if((sp < 0.34 && onGround()) || ball.slow > 50){
+    ball.vx = ball.vy = 0; ball.rest = true; ball.slow = 0;
     ball.homeX = ball.x; ball.homeY = ball.y;
   }
   sink();
   tugCam();
 }
 
+const STICKY = t => t==='s' || t==='tg';         // sand and tall grass both kill momentum
+const rampY = (b,x) => {                          // surface height at a given x
+  const u = Math.max(0, Math.min(1, (x-b.x)/b.w));
+  return b.dir > 0 ? b.y + b.h*(1-u) : b.y + b.h*u;
+};
+
 function onGround(){
   for(const b of B){
     if(b.t==='w') continue;
-    if(ball.x > b.x-R && ball.x < b.x+b.w+R &&
-       Math.abs((ball.y+R) - b.y) < 1.6) return true;
+    if(ball.x < b.x-R || ball.x > b.x+b.w+R) continue;
+    if(b.t==='r'){ if(Math.abs((ball.y+R) - rampY(b,ball.x)) < 4) return true; continue; }
+    if(Math.abs((ball.y+R) - b.y) < 1.6) return true;
   }
   return false;
 }
@@ -288,6 +349,7 @@ function onGround(){
 function collide(){
   ball.sand = false;
   for(const b of B){
+    if(b.t==='r'){ rampCollide(b); continue; }
     const cx = Math.max(b.x, Math.min(ball.x, b.x+b.w));
     const cy = Math.max(b.y, Math.min(ball.y, b.y+b.h));
     const dx = ball.x-cx, dy = ball.y-cy, d2 = dx*dx+dy*dy;
@@ -303,18 +365,36 @@ function collide(){
 
     const vn = ball.vx*nx + ball.vy*ny;
     if(vn < 0){
-      const bounce = b.t==='s' ? 0.06 : 0.44;
+      const bounce = STICKY(b.t) ? 0.06 : 0.44;
       ball.vx -= (1+bounce)*vn*nx;
       ball.vy -= (1+bounce)*vn*ny;
     }
     // tangential friction
-    const f = b.t==='s' ? 0.55 : 0.985;
+    const f = b.t==='s' ? 0.55 : b.t==='tg' ? 0.66 : 0.985;
     const tx = -ny, ty = nx;
     let vt = ball.vx*tx + ball.vy*ty;
     const nvt = vt*f;
     ball.vx += (nvt-vt)*tx; ball.vy += (nvt-vt)*ty;
-    if(b.t==='s') ball.sand = true;
+    if(STICKY(b.t)) ball.sand = true;
   }
+}
+
+// slope: treat the ramp face as a clipped half-space and bounce off its normal
+function rampCollide(b){
+  if(ball.x < b.x-R || ball.x > b.x+b.w+R) return;
+  const L = Math.hypot(b.w, b.h);
+  const nx = (b.dir > 0 ? -b.h : b.h)/L, ny = -b.w/L;
+  const px = b.x, py = b.dir > 0 ? b.y+b.h : b.y;      // a point on the face
+  const dist = (ball.x-px)*nx + (ball.y-py)*ny;
+  if(dist >= R || dist < -46) return;                   // clear, or well inside the body
+  const pen = R-dist;
+  ball.x += nx*pen; ball.y += ny*pen;
+  const vn = ball.vx*nx + ball.vy*ny;
+  if(vn < 0){ ball.vx -= 1.44*vn*nx; ball.vy -= 1.44*vn*ny; }
+  const tx = -ny, ty = nx;                              // slopes are fast — barely any drag
+  let vt = ball.vx*tx + ball.vy*ty;
+  const nvt = vt*0.99;
+  ball.vx += (nvt-vt)*tx; ball.vy += (nvt-vt)*ty;
 }
 
 function splash(){
@@ -384,7 +464,7 @@ function drawBlocks(){
   for(const b of B){
     const y = b.y-cam;
     if(y > VH+80 || y+b.h < -80) continue;
-    if(b.x < -20) continue;                       // side walls invisible
+    if(b.wall) continue;                          // side walls invisible
     if(b.t==='w'){
       ctx.fillStyle = 'rgba(40,140,225,.85)';
       ctx.fillRect(b.x, y, b.w, b.h);
@@ -395,8 +475,36 @@ function drawBlocks(){
     }
     if(b.t==='s'){
       ctx.fillStyle = '#e8d08a'; ctx.fillRect(b.x, y, b.w, b.h);
+      ctx.fillStyle = '#f2e0ae'; ctx.fillRect(b.x, y, b.w, 3);
       ctx.fillStyle = '#d4b96a';
-      for(let x=b.x+4;x<b.x+b.w;x+=9) ctx.fillRect(x, y+b.h-4, 4, 2);
+      for(let x=b.x+4;x<b.x+b.w;x+=9) ctx.fillRect(x, y+7, 4, 2);
+      continue;
+    }
+    if(b.t==='tg'){
+      ctx.fillStyle = '#256b2c'; ctx.fillRect(b.x, y+4, b.w, b.h-4);
+      for(let x=b.x+1;x<b.x+b.w-1;x+=4){        // blades, swaying
+        const sway = Math.sin(perf/560 + x*0.5)*2.2;
+        const hgt = 9 + ((x*7)%5);
+        ctx.strokeStyle = (x|0)%8 < 4 ? '#3fbf4a' : '#2e9c38';
+        ctx.lineWidth = 2; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(x, y+8); ctx.lineTo(x+sway, y+8-hgt); ctx.stroke();
+      }
+      continue;
+    }
+    if(b.t==='r'){                               // sloped ramp
+      const yTop = b.y-cam, yBot = b.y+b.h-cam;
+      ctx.beginPath();
+      if(b.dir > 0){ ctx.moveTo(b.x, yBot); ctx.lineTo(b.x+b.w, yTop); ctx.lineTo(b.x+b.w, yBot); }
+      else         { ctx.moveTo(b.x, yTop); ctx.lineTo(b.x+b.w, yBot); ctx.lineTo(b.x, yBot); }
+      ctx.closePath();
+      ctx.fillStyle = '#7a4a2b'; ctx.fill();
+      // grass along the sloped face
+      ctx.lineWidth = 6; ctx.lineCap = 'butt'; ctx.strokeStyle = '#3fa93f';
+      ctx.beginPath();
+      if(b.dir > 0){ ctx.moveTo(b.x, yBot-3); ctx.lineTo(b.x+b.w, yTop-3); }
+      else         { ctx.moveTo(b.x, yTop-3); ctx.lineTo(b.x+b.w, yBot-3); }
+      ctx.stroke();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#59d155'; ctx.stroke();
       continue;
     }
     // grass-topped rock
