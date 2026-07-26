@@ -1,24 +1,41 @@
 <!DOCTYPE html>
+<!--
+  CLIFF GOLF — a vertical mini golf climb
+  Copyright (c) 2026 abandonedBaby Games. All rights reserved.
+  Viewable source. No licence to copy, modify, or redistribute — see LICENSE.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cliff Golf — Vertical Mini Golf</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<meta name="author" content="abandonedBaby Games">
+<meta name="copyright" content="© 2026 abandonedBaby Games">
+<meta name="description" content="Cliff Golf — a vertical mini golf climb. Nineteen holes up a cliff face, past water, sand, wind and birds. From abandonedBaby Games.">
+<meta property="og:title" content="Cliff Golf — abandonedBaby Games">
+<meta property="og:description" content="Nineteen holes straight up a cliff. Mind the birds and the wind.">
+<meta property="og:type" content="website">
+<title>Cliff Golf — abandonedBaby Games</title>
 <style>
   html,body{margin:0;padding:0;height:100%;background:#0b1020;color:#e8eefc;
     font-family:ui-monospace,Menlo,Consolas,monospace;overflow:hidden;
     overscroll-behavior:none;-webkit-user-select:none;user-select:none}
   /* canvas is the whole viewport — no letterboxing on any device */
   canvas{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none}
-  #hint{position:fixed;bottom:max(8px,env(safe-area-inset-bottom));left:0;right:0;
-    text-align:center;font-size:12px;color:#9fb2d4;pointer-events:none;
+  #hint{position:fixed;bottom:max(22px,calc(env(safe-area-inset-bottom) + 16px));
+    left:0;right:0;text-align:center;font-size:12px;color:#9fb2d4;pointer-events:none;
     text-shadow:0 1px 3px #000a;padding:0 8px}
-  @media (max-width:560px){ #hint{font-size:10px} }
+  #brand{position:fixed;bottom:max(6px,env(safe-area-inset-bottom));left:0;right:0;
+    text-align:center;font-size:10px;letter-spacing:.14em;color:#6c7fa4;
+    pointer-events:none;text-shadow:0 1px 3px #000a}
+  #brand b{color:#9ab0d8;font-weight:700}
+  @media (max-width:560px){ #hint{font-size:10px} #brand{font-size:9px} }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="hint">drag DOWN from the ball to aim &amp; power up — release to launch · mouse wheel to peek · R = reset shot · mind the birds &amp; wind</div>
+<div id="brand"><b>abandonedBaby GAMES</b> · © 2026</div>
 <script>
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 // VW is the fixed width of the play column in world units — level design depends on
@@ -275,6 +292,7 @@ function drawBirds(){
 // -------------------------------------------------------------------- state
 let ball, hole, strokes, total, cam, camPeek, aiming, aimFrom, mouse, done, msg, msgT;
 let restartArm = 0;                  // declared here: reset() runs before the input section
+let introT = 170;                    // studio card frames remaining on first load
 
 function reset(){
   hole = 0; strokes = 0; total = 0; done = false; camPeek = 0; msg=''; msgT=0;
@@ -314,6 +332,7 @@ function inBtn(s){
 }
 function down(e){
   e.preventDefault();
+  introT = 0;                                      // any touch skips the studio card
   const s = toScreen(e);
   if(inBtn(s)){
     if(restartArm > 0){ restartArm = 0; reset(); flash('RESTARTED'); }
@@ -1014,16 +1033,52 @@ function hud(){
     ctx.globalAlpha = 1; msgT--;
   }
   if(done){
-    ctx.fillStyle = 'rgba(5,8,20,.82)'; ctx.fillRect(VX0,0,VWF,VH);
+    ctx.fillStyle = 'rgba(5,8,20,.86)'; ctx.fillRect(VX0,0,VWF,VH);
     ctx.textAlign = 'center'; ctx.fillStyle = '#ffd23f';
     ctx.font = 'bold 30px ui-monospace,monospace';
-    ctx.fillText('SUMMIT REACHED', C, VH/2-30);
+    ctx.fillText('SUMMIT REACHED', C, VH/2-46);
     ctx.fillStyle = '#e8eefc'; ctx.font = 'bold 18px ui-monospace,monospace';
-    ctx.fillText('Total strokes: ' + total, C, VH/2+6);
+    ctx.fillText('Total strokes: ' + total, C, VH/2-10);
     ctx.font = '14px ui-monospace,monospace';
-    ctx.fillText('click to play again', C, VH/2+40);
+    ctx.fillText('click to play again', C, VH/2+24);
+    wordmark(C, VH/2+92, 1);
   }
   ctx.textAlign = 'left';
+}
+
+// abandonedBaby Games wordmark: a golf ball moon over the studio name
+function wordmark(cx, cy, a){
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center';
+  // ball, with its crescent shadow
+  ctx.fillStyle = '#e8eefc';
+  ctx.beginPath(); ctx.arc(cx, cy-24, 11, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(20,30,55,.55)';
+  ctx.beginPath(); ctx.arc(cx+4, cy-25, 9.5, 0, 7); ctx.fill();
+  ctx.fillStyle = '#c3ccdd';
+  for(let i=0;i<3;i++){
+    const an = 1.1 + i*2.1;
+    ctx.beginPath(); ctx.arc(cx+Math.cos(an)*4.5, cy-24+Math.sin(an)*4.5, 1.5, 0, 7); ctx.fill();
+  }
+  ctx.font = 'bold 15px ui-monospace,monospace';
+  ctx.fillStyle = '#9ab0d8';
+  ctx.fillText('abandonedBaby', cx, cy);
+  ctx.font = 'bold 11px ui-monospace,monospace';
+  ctx.fillStyle = '#6c7fa4';
+  ctx.fillText('G A M E S', cx, cy+16);
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
+// studio card on load — fades itself out, and any touch skips it
+function intro(){
+  if(introT <= 0) return;
+  introT--;
+  const a = Math.min(1, introT/45);
+  ctx.fillStyle = 'rgba(5,8,20,'+(0.9*a).toFixed(3)+')';
+  ctx.fillRect(VX0, 0, VWF, VH);
+  wordmark(VX0+VWF/2, VH/2, a);
 }
 
 let vig = null;
@@ -1046,7 +1101,7 @@ function loop(t){
   for(let i=0;i<HOLES.length;i++){
     if(i===hole || (i>hole && i<hole+3)) drawFlag(HOLES[i], i===hole);
   }
-  drawBirds(); drawBall(); drawAim(); vignette(); hud();
+  drawBirds(); drawBall(); drawAim(); vignette(); hud(); intro();
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
