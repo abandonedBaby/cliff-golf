@@ -46,6 +46,7 @@ function pit(x,y,w,t){
 function ramp(x,y,w,h,dir){
   B.push({x,y,w,h,t:'r',dir});
   g(x, y+h, w, 12);
+  B[B.length-1].base = true;      // support block: no grass cap, no trees
 }
 
 // ground
@@ -429,28 +430,61 @@ function tugCam(){
 }
 
 // ------------------------------------------------------------------ drawing
+const hsh = n => { const v = Math.sin(n*127.1)*43758.5453; return v - Math.floor(v); };
+
+// a tiling jagged silhouette that scrolls slower than the world, for depth
+function ridge(depth, col, amp, step, seed){
+  const P = 1500;
+  let base = ((1400 - cam*depth) % P + P) % P;
+  ctx.fillStyle = col;
+  for(let k=-1;k<=1;k++){
+    const y0 = base + k*P;
+    if(y0 > VH+260 || y0 < -320) continue;
+    ctx.beginPath(); ctx.moveTo(-10, y0+300);
+    for(let x=-10;x<=VW+10;x+=step){
+      const h = hsh(x*0.021+seed)*amp + hsh(x*0.083+seed)*amp*0.45;
+      ctx.lineTo(x, y0 - h);
+    }
+    ctx.lineTo(VW+10, y0+300); ctx.closePath(); ctx.fill();
+  }
+}
+
 function sky(){
   const gr = ctx.createLinearGradient(0,0,0,VH);
   const t = 1 - Math.max(0, Math.min(1, cam/(WH-VH)));   // 0 top .. 1 bottom
-  gr.addColorStop(0, mix('#0d1b45','#7ec0ee', t));
-  gr.addColorStop(1, mix('#3b5fa8','#bfe6ff', t));
+  gr.addColorStop(0,   mix('#0a1338','#6fb7e8', t));
+  gr.addColorStop(0.55,mix('#1c3068','#9ed6f5', t));
+  gr.addColorStop(1,   mix('#3b5fa8','#d8f0ff', t));
   ctx.fillStyle = gr; ctx.fillRect(0,0,VW,VH);
   // stars near the top of the map
-  if(cam < 900){
-    ctx.fillStyle = 'rgba(255,255,255,'+(1-cam/900).toFixed(2)+')';
-    for(let i=0;i<70;i++){
-      const sx = (i*97)%VW, sy = (i*173)%900 - cam;
-      if(sy>0&&sy<VH) ctx.fillRect(sx, sy, 2, 2);
+  if(cam < 1100){
+    const a = 1-cam/1100;
+    for(let i=0;i<90;i++){
+      const sx = (i*97)%VW, sy = (i*173)%1100 - cam;
+      if(sy>0&&sy<VH){
+        const tw = 0.5+0.5*Math.sin(perf/420+i);
+        ctx.fillStyle = 'rgba(255,255,255,'+(a*tw*0.9).toFixed(2)+')';
+        ctx.fillRect(sx, sy, i%7?1:2, i%7?1:2);
+      }
     }
   }
-  // clouds
-  ctx.fillStyle = 'rgba(255,255,255,.55)';
-  for(let i=0;i<26;i++){
-    const cxp = (i*211)%VW, cyp = (i*337)%WH - cam;
-    if(cyp>-30&&cyp<VH+30){
-      ctx.beginPath();
-      ctx.ellipse(cxp,cyp,34,11,0,0,7); ctx.ellipse(cxp+24,cyp-6,22,9,0,0,7);
-      ctx.fill();
+  // parallax mountains
+  ridge(0.22, 'rgba(96,132,180,.40)', 150, 16, 3.1);
+  ridge(0.42, 'rgba(58,88,136,.52)',  110, 13, 8.7);
+  // clouds, two drifting layers
+  for(let L=0;L<2;L++){
+    const dep = L?0.72:0.5, sz = L?1:0.7;
+    ctx.fillStyle = 'rgba(255,255,255,'+(L?0.55:0.32)+')';
+    for(let i=0;i<22;i++){
+      const cxp = ((i*211 + perf*(L?0.006:0.003))%(VW+140))-70;
+      const cyp = (i*337)%WH - cam*dep - (L?0:200);
+      if(cyp>-40&&cyp<VH+40){
+        ctx.beginPath();
+        ctx.ellipse(cxp,cyp,34*sz,11*sz,0,0,7);
+        ctx.ellipse(cxp+24*sz,cyp-6*sz,22*sz,9*sz,0,0,7);
+        ctx.ellipse(cxp-22*sz,cyp-2*sz,18*sz,8*sz,0,0,7);
+        ctx.fill();
+      }
     }
   }
 }
@@ -460,76 +494,289 @@ function mix(a,b,t){
   return 'rgb('+A.map((v,i)=>Math.round(v+(Bc[i]-v)*t)).join(',')+')';
 }
 
+// weathered rock face: banded gradient, strata, speckle, ragged underside
+function rockFace(x,y,w,h,seed){
+  const g2 = ctx.createLinearGradient(0,y,0,y+h);
+  g2.addColorStop(0,'#8d5a35'); g2.addColorStop(0.28,'#71462a');
+  g2.addColorStop(0.7,'#573520'); g2.addColorStop(1,'#3a2213');
+  ctx.fillStyle = g2; ctx.fillRect(x,y,w,h);
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+  for(let sy=10; sy<h; sy+=9){                   // strata
+    ctx.fillStyle = 'rgba(0,0,0,.15)';
+    for(let sx=x; sx<x+w; sx+=26){
+      const o = hsh(seed+sy*0.7+sx*0.3);
+      ctx.fillRect(sx+o*10, y+sy, 12+o*11, 3);
+    }
+  }
+  for(let i=0;i<w*h/240;i++){                    // speckle
+    const o = hsh(seed+i*1.7), o2 = hsh(seed+i*3.9);
+    ctx.fillStyle = o>0.55 ? 'rgba(255,220,180,.16)' : 'rgba(0,0,0,.16)';
+    ctx.fillRect(x+o*w, y+8+o2*(h-8), 2, 2);
+  }
+  ctx.restore();
+  // ragged underside
+  ctx.fillStyle = '#3a2213';
+  for(let sx=x; sx<x+w; sx+=9){
+    const d = hsh(seed+sx*0.41)*5;
+    ctx.fillRect(sx, y+h-1, 9, d);
+  }
+}
+// grass cap with a scalloped, overhanging lip
+function grassCap(x,y,w,seed){
+  ctx.fillStyle = '#2c8a33';
+  for(let sx=x; sx<x+w; sx+=8){                  // hanging scallops
+    const d = 3+hsh(seed+sx*0.53)*4;
+    ctx.beginPath(); ctx.arc(sx+4, y+6, 4, 0, Math.PI); ctx.fill();
+    ctx.fillRect(sx, y+4, 8, d);
+  }
+  ctx.fillStyle = '#2c8a33'; ctx.fillRect(x,y,w,7);
+  ctx.fillStyle = '#46bd45'; ctx.fillRect(x,y,w,3.5);
+  ctx.fillStyle = '#74e26d'; ctx.fillRect(x,y,w,1.5);
+  ctx.strokeStyle = '#46bd45'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+  for(let sx=x+2; sx<x+w-1; sx+=7){              // sprigs along the lip
+    const o = hsh(seed+sx*0.29);
+    if(o<0.45) continue;
+    const sw = Math.sin(perf/900+sx*0.2)*1.2;
+    ctx.beginPath(); ctx.moveTo(sx, y+1); ctx.lineTo(sx+sw, y-2-o*3); ctx.stroke();
+  }
+}
+
 function drawBlocks(){
   for(const b of B){
     const y = b.y-cam;
     if(y > VH+80 || y+b.h < -80) continue;
     if(b.wall) continue;                          // side walls invisible
+    const seed = b.x*0.37 + b.y*0.11;
+
     if(b.t==='w'){
-      ctx.fillStyle = 'rgba(40,140,225,.85)';
-      ctx.fillRect(b.x, y, b.w, b.h);
-      ctx.fillStyle = 'rgba(255,255,255,.45)';
-      for(let x=b.x+3;x<b.x+b.w-3;x+=12)
-        ctx.fillRect(x + (Math.sin(perf/300+x)*2|0), y+4, 6, 2);
+      const g2 = ctx.createLinearGradient(0,y,0,y+b.h);
+      g2.addColorStop(0,'#7fd4f2'); g2.addColorStop(0.45,'#2f95d8'); g2.addColorStop(1,'#14548f');
+      ctx.fillStyle = g2; ctx.fillRect(b.x, y, b.w, b.h);
+      ctx.save(); ctx.beginPath(); ctx.rect(b.x,y,b.w,b.h); ctx.clip();
+      for(let i=0;i<3;i++){                       // travelling surface ripples
+        ctx.beginPath();
+        for(let x=b.x;x<=b.x+b.w;x+=3){
+          const yy = y+3+i*4 + Math.sin(x*0.19 + perf/300 + i*1.4)*1.7;
+          x===b.x ? ctx.moveTo(x,yy) : ctx.lineTo(x,yy);
+        }
+        ctx.strokeStyle = 'rgba(255,255,255,'+(0.5-i*0.14).toFixed(2)+')';
+        ctx.lineWidth = 2; ctx.stroke();
+      }
+      ctx.restore();
+      ctx.fillStyle = 'rgba(255,255,255,.55)';    // foam at the walls
+      ctx.fillRect(b.x, y+1, 2, b.h-2); ctx.fillRect(b.x+b.w-2, y+1, 2, b.h-2);
       continue;
     }
     if(b.t==='s'){
-      ctx.fillStyle = '#e8d08a'; ctx.fillRect(b.x, y, b.w, b.h);
-      ctx.fillStyle = '#f2e0ae'; ctx.fillRect(b.x, y, b.w, 3);
-      ctx.fillStyle = '#d4b96a';
-      for(let x=b.x+4;x<b.x+b.w;x+=9) ctx.fillRect(x, y+7, 4, 2);
+      const g2 = ctx.createLinearGradient(0,y,0,y+b.h);
+      g2.addColorStop(0,'#f4e3b0'); g2.addColorStop(1,'#cfa95f');
+      ctx.fillStyle = g2; ctx.fillRect(b.x, y, b.w, b.h);
+      ctx.strokeStyle = 'rgba(160,120,60,.45)'; ctx.lineWidth = 1.5;
+      for(let i=0;i<3;i++){                       // wind ripples
+        ctx.beginPath();
+        for(let x=b.x+2;x<=b.x+b.w-2;x+=4){
+          const yy = y+5+i*4 + Math.sin(x*0.22+i)*1.1;
+          x===b.x+2 ? ctx.moveTo(x,yy) : ctx.lineTo(x,yy);
+        }
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(120,88,44,.5)';       // pebbles
+      for(let i=0;i<b.w/14;i++) ctx.fillRect(b.x+4+hsh(seed+i)*(b.w-8), y+4+hsh(seed+i*2.3)*8, 2, 2);
+      ctx.fillStyle = 'rgba(90,62,26,.28)';       // inner shadow — reads as a basin
+      ctx.fillRect(b.x, y, 3, b.h); ctx.fillRect(b.x+b.w-3, y, 3, b.h);
       continue;
     }
     if(b.t==='tg'){
-      ctx.fillStyle = '#256b2c'; ctx.fillRect(b.x, y+4, b.w, b.h-4);
-      for(let x=b.x+1;x<b.x+b.w-1;x+=4){        // blades, swaying
-        const sway = Math.sin(perf/560 + x*0.5)*2.2;
-        const hgt = 9 + ((x*7)%5);
-        ctx.strokeStyle = (x|0)%8 < 4 ? '#3fbf4a' : '#2e9c38';
-        ctx.lineWidth = 2; ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(x, y+8); ctx.lineTo(x+sway, y+8-hgt); ctx.stroke();
+      ctx.fillStyle = '#1d5e26'; ctx.fillRect(b.x, y+4, b.w, b.h-4);
+      ctx.lineCap = 'round';
+      for(let pass=0;pass<2;pass++){              // back blades darker, front lighter
+        for(let x=b.x+1;x<b.x+b.w-1;x+=3){
+          const o = hsh(seed+x*0.7+pass*9);
+          const sway = Math.sin(perf/560 + x*0.35 + pass)*(2.2+pass);
+          const hgt = (pass?7:11) + o*6;
+          ctx.strokeStyle = pass ? '#2b8a34' : '#43c94d';
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x, y+9); ctx.lineTo(x+sway, y+9-hgt); ctx.stroke();
+        }
       }
       continue;
     }
-    if(b.t==='r'){                               // sloped ramp
-      const yTop = b.y-cam, yBot = b.y+b.h-cam;
-      ctx.beginPath();
+    if(b.t==='r'){                                // sloped ramp
+      const yTop = y, yBot = y+b.h;
+      ctx.save(); ctx.beginPath();
       if(b.dir > 0){ ctx.moveTo(b.x, yBot); ctx.lineTo(b.x+b.w, yTop); ctx.lineTo(b.x+b.w, yBot); }
       else         { ctx.moveTo(b.x, yTop); ctx.lineTo(b.x+b.w, yBot); ctx.lineTo(b.x, yBot); }
-      ctx.closePath();
-      ctx.fillStyle = '#7a4a2b'; ctx.fill();
-      // grass along the sloped face
-      ctx.lineWidth = 6; ctx.lineCap = 'butt'; ctx.strokeStyle = '#3fa93f';
-      ctx.beginPath();
-      if(b.dir > 0){ ctx.moveTo(b.x, yBot-3); ctx.lineTo(b.x+b.w, yTop-3); }
-      else         { ctx.moveTo(b.x, yTop-3); ctx.lineTo(b.x+b.w, yBot-3); }
-      ctx.stroke();
-      ctx.lineWidth = 2; ctx.strokeStyle = '#59d155'; ctx.stroke();
+      ctx.closePath(); ctx.clip();
+      rockFace(b.x, yTop, b.w, b.h+6, seed);
+      ctx.restore();
+      // grass running down the sloped face
+      const x1 = b.x, y1 = b.dir>0 ? yBot-3 : yTop-3;
+      const x2 = b.x+b.w, y2 = b.dir>0 ? yTop-3 : yBot-3;
+      ctx.lineCap = 'butt';
+      ctx.strokeStyle = '#2c8a33'; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      ctx.strokeStyle = '#46bd45'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(x1,y1-1); ctx.lineTo(x2,y2-1); ctx.stroke();
+      ctx.strokeStyle = '#74e26d'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x1,y1-3); ctx.lineTo(x2,y2-3); ctx.stroke();
       continue;
     }
-    // grass-topped rock
-    ctx.fillStyle = '#7a4a2b'; ctx.fillRect(b.x, y, b.w, b.h);
-    ctx.fillStyle = '#5d3620';
-    for(let x=b.x;x<b.x+b.w;x+=16) ctx.fillRect(x+2, y+8, 12, 4);
-    ctx.fillStyle = '#3fa93f'; ctx.fillRect(b.x, y, b.w, 6);
-    ctx.fillStyle = '#59d155'; ctx.fillRect(b.x, y, b.w, 3);
+    // grass-topped rock ledge
+    ctx.fillStyle = 'rgba(0,0,0,.16)';            // shadow it casts on the air below
+    ctx.fillRect(b.x+4, y+b.h+2, b.w, 5);
+    rockFace(b.x, y, b.w, b.h, seed);
+    if(b.h > 100){                                // deep bedrock: boulders, then darkness
+      ctx.save(); ctx.beginPath(); ctx.rect(b.x,y,b.w,b.h); ctx.clip();
+      for(let i=0;i<26;i++){
+        const bx = b.x+hsh(seed+i*1.3)*b.w, by = y+30+hsh(seed+i*2.7)*(b.h-40);
+        const br = 6+hsh(seed+i*4.1)*16;
+        ctx.fillStyle = 'rgba(0,0,0,.13)';
+        ctx.beginPath(); ctx.ellipse(bx, by, br, br*0.72, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = 'rgba(255,214,170,.07)';
+        ctx.beginPath(); ctx.ellipse(bx-br*0.2, by-br*0.24, br*0.6, br*0.4, 0, 0, 7); ctx.fill();
+      }
+      const dg = ctx.createLinearGradient(0, y+40, 0, y+b.h);
+      dg.addColorStop(0,'rgba(12,7,4,0)'); dg.addColorStop(1,'rgba(12,7,4,.8)');
+      ctx.fillStyle = dg; ctx.fillRect(b.x, y+40, b.w, b.h-40);
+      ctx.restore();
+    }
+    if(!b.base) grassCap(b.x, y, b.w, seed);
+  }
+}
+
+// ------------------------------------------------------------------- scenery
+// Trees are decoration only — no collision. Seeded off the ledges themselves so
+// they never land on a cup, a hazard, a lip or a ramp.
+const TREES = [];
+(function seedTrees(){
+  const clear = (x,y) => {
+    if(HOLES.some(h => Math.abs(h.x-x) < 40 && Math.abs(h.y-y) < 8)) return false;
+    return !B.some(b => (b.t!=='g' || b.w<=6) &&
+      x > b.x-12 && x < b.x+b.w+12 && Math.abs(b.y-y) < 46);
+  };
+  for(const b of B){
+    if(b.t!=='g' || b.wall || b.base || b.w < 58) continue;
+    const floor = b.h > 100;
+    const n = floor ? 8 : (b.w > 120 ? 2 : 1);
+    for(let i=0;i<n;i++){
+      const x = b.x + 12 + (b.w-24)*((i+0.5)/n) + (hsh(b.x+b.y+i*5)-0.5)*20;
+      if(x < b.x+10 || x > b.x+b.w-10) continue;
+      if(!clear(x, b.y)) continue;
+      if(floor && Math.abs(x-TEE.x) < 60) continue;
+      const r = hsh(x*3.1 + b.y*0.7);
+      TREES.push({x, y:b.y, pine:r<0.55, s:0.72+r*0.7, seed:x*0.13+b.y*0.07});
+    }
+  }
+})();
+
+function drawTrees(){
+  for(const t of TREES){
+    const y = t.y-cam;
+    if(y < -110 || y > VH+30) continue;
+    const s = t.s, sway = Math.sin(perf/1100 + t.seed)*2.2;
+    ctx.fillStyle = 'rgba(0,0,0,.18)';            // root shadow
+    ctx.beginPath(); ctx.ellipse(t.x, y+1, 9*s, 3*s, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#5a3a22';                    // trunk
+    ctx.beginPath();
+    ctx.moveTo(t.x-2.5*s, y+1); ctx.lineTo(t.x+2.5*s, y+1);
+    ctx.lineTo(t.x+1.4*s+sway*0.3, y-16*s); ctx.lineTo(t.x-1.4*s+sway*0.3, y-16*s);
+    ctx.closePath(); ctx.fill();
+    if(t.pine){
+      for(let i=0;i<3;i++){
+        const cy = y - 12*s - i*11*s, wd = (17-i*4)*s, ht = 16*s;
+        const off = sway*(0.4+i*0.28);
+        ctx.fillStyle = ['#1e6b2c','#248034','#2b923c'][i];
+        ctx.beginPath();
+        ctx.moveTo(t.x+off, cy-ht); ctx.lineTo(t.x+wd+off*0.6, cy); ctx.lineTo(t.x-wd+off*0.6, cy);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(120,225,120,.30)';    // sunlit side
+      ctx.beginPath();
+      ctx.moveTo(t.x+sway, y-45*s); ctx.lineTo(t.x-4*s+sway, y-30*s); ctx.lineTo(t.x+sway, y-30*s);
+      ctx.closePath(); ctx.fill();
+    } else {
+      const cy = y - 26*s, ox = sway;
+      ctx.fillStyle = '#256e2a';
+      ctx.beginPath();
+      ctx.arc(t.x-8*s+ox, cy+4*s, 9*s, 0, 7); ctx.arc(t.x+8*s+ox, cy+3*s, 8.5*s, 0, 7);
+      ctx.arc(t.x+ox, cy-5*s, 11*s, 0, 7); ctx.fill();
+      ctx.fillStyle = '#33903a';
+      ctx.beginPath(); ctx.arc(t.x-2*s+ox, cy-4*s, 8*s, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(140,235,130,.45)';
+      ctx.beginPath(); ctx.arc(t.x-5*s+ox, cy-8*s, 4.5*s, 0, 7); ctx.fill();
+    }
+  }
+}
+
+// Waterfalls spilling off ledge edges — decoration, no collision.
+const FALLS = [
+  {x:  0, y:3978, w:34, h:390},
+  {x:446, y:3158, w:34, h:202},
+  {x:436, y:2048, w:34, h:152},
+  {x: 40, y:1148, w:34, h:212},
+  {x:140, y: 448, w:34, h:222},
+];
+function drawFalls(){
+  for(const f of FALLS){
+    const y = f.y-cam;
+    if(y > VH+40 || y+f.h < -40) continue;
+    const g2 = ctx.createLinearGradient(f.x,0,f.x+f.w,0);
+    g2.addColorStop(0,  'rgba(110,190,235,.50)');
+    g2.addColorStop(0.5,'rgba(200,240,255,.80)');
+    g2.addColorStop(1,  'rgba(110,190,235,.50)');
+    ctx.fillStyle = g2; ctx.fillRect(f.x, y, f.w, f.h);
+    ctx.save(); ctx.beginPath(); ctx.rect(f.x,y,f.w,f.h); ctx.clip();
+    ctx.fillStyle = 'rgba(255,255,255,.55)';      // falling streaks
+    for(let i=0;i<16;i++){
+      const sx = f.x+3 + ((i*7.3)%(f.w-6));
+      const sy = y + ((perf*0.45 + i*73) % (f.h+40)) - 20;
+      ctx.fillRect(sx, sy, 2, 16 + (i%4)*9);
+    }
+    ctx.restore();
+    ctx.fillStyle = 'rgba(235,252,255,.9)';       // lip
+    ctx.fillRect(f.x, y-4, f.w, 6);
+    const by = y+f.h;                             // mist at the base
+    for(let i=0;i<9;i++){
+      const p = ((perf/900 + i*0.61) % 1);
+      ctx.fillStyle = 'rgba(255,255,255,'+(0.3*(1-p)).toFixed(2)+')';
+      ctx.beginPath();
+      ctx.arc(f.x+f.w/2 + Math.sin(i*2.1)*(12+p*16), by-4-p*18, 5+p*14, 0, 7);
+      ctx.fill();
+    }
   }
 }
 
 function drawFlag(h, active){
   const y = h.y-cam;
   if(y < -120 || y > VH+60) return;
-  // cup
-  ctx.fillStyle = '#111'; ctx.beginPath();
-  ctx.ellipse(h.x, y+1, 11, 4, 0, 0, 7); ctx.fill();
-  // pole
-  ctx.fillStyle = active ? '#f7f7f7' : '#9aa6bb';
-  ctx.fillRect(h.x-1, y-56, 2, 56);
-  // flag
-  ctx.fillStyle = active ? '#ff3b30' : '#6b7488';
+  // cup: pale rim, dark throat
+  ctx.fillStyle = '#d8e4c8'; ctx.beginPath();
+  ctx.ellipse(h.x, y+1, 12, 4.6, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#0d1a10'; ctx.beginPath();
+  ctx.ellipse(h.x, y+1.5, 10, 3.4, 0, 0, 7); ctx.fill();
+  if(active){                                    // glow so the live cup reads
+    ctx.strokeStyle = 'rgba(255,210,63,'+(0.35+0.25*Math.sin(perf/300)).toFixed(2)+')';
+    ctx.lineWidth = 2; ctx.beginPath();
+    ctx.ellipse(h.x, y+1, 15, 6, 0, 0, 7); ctx.stroke();
+  }
+  // pole with a shaded side
+  ctx.fillStyle = active ? '#f7f7f7' : '#9aa6bb'; ctx.fillRect(h.x-1.5, y-56, 3, 56);
+  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(h.x+0.5, y-56, 1, 56);
+  ctx.fillStyle = active ? '#ffd23f' : '#8892a6';
+  ctx.beginPath(); ctx.arc(h.x, y-57, 2.6, 0, 7); ctx.fill();
+  // flag, rippling
   const flap = active ? Math.sin(perf/160)*3 : 0;
+  const fl2  = active ? Math.sin(perf/160+1.1)*2.4 : 0;
+  ctx.fillStyle = active ? '#ff3b30' : '#6b7488';
   ctx.beginPath();
-  ctx.moveTo(h.x+1, y-56); ctx.lineTo(h.x+26, y-49+flap); ctx.lineTo(h.x+1, y-42);
+  ctx.moveTo(h.x+1, y-56);
+  ctx.quadraticCurveTo(h.x+14, y-55+flap, h.x+27, y-49+fl2);
+  ctx.quadraticCurveTo(h.x+14, y-46+flap, h.x+1, y-42);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,.18)';
+  ctx.beginPath();
+  ctx.moveTo(h.x+1, y-49); ctx.quadraticCurveTo(h.x+14, y-47+flap, h.x+27, y-49+fl2);
+  ctx.quadraticCurveTo(h.x+14, y-46+flap, h.x+1, y-42);
   ctx.closePath(); ctx.fill();
 }
 
@@ -610,15 +857,25 @@ function hud(){
   ctx.textAlign = 'left';
 }
 
+let vig = null;
+function vignette(){
+  if(!vig){
+    vig = ctx.createRadialGradient(VW/2, VH/2, VH*0.34, VW/2, VH/2, VH*0.78);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(0,0,0,.28)');
+  }
+  ctx.fillStyle = vig; ctx.fillRect(0,0,VW,VH);
+}
+
 let perf = 0;
 function loop(t){
   perf = t||0;
   step();
-  sky(); drawBlocks();
+  sky(); drawFalls(); drawBlocks(); drawTrees();
   for(let i=0;i<HOLES.length;i++){
     if(i===hole || (i>hole && i<hole+3)) drawFlag(HOLES[i], i===hole);
   }
-  drawBirds(); drawBall(); drawAim(); hud();
+  drawBirds(); drawBall(); drawAim(); vignette(); hud();
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
