@@ -564,19 +564,21 @@ function move(e){ if(aiming){ e.preventDefault(); mouse = toWorld(e); } }
 // is never a shot anyone wants — that gesture cancels instead. Esc and right-click
 // do the same for mouse players.
 //
-// The affordance lives in a banner at the top of the screen, NOT next to the ball:
-// cancelling means dragging your finger up above the ball, which would sit directly
-// on top of anything drawn there. Releasing on the banner itself also cancels.
-function cancelBar(){
-  const w = Math.min(VWF-20, Math.max(cssPx(260), 210));
-  const h = Math.max(cssPx(46), 34);
-  return {x: VX0 + (VWF-w)/2, y: 40, w, h};
+// The target sits above the ball so the whole gesture stays in one thumb's reach.
+// It is deliberately set well clear of the ball and its caption is drawn ABOVE it,
+// so a fingertip resting on the badge never hides the feedback.
+function cancelBtn(){
+  // sized and spaced purely in CSS px so the badge is the same physical size and
+  // the same thumb-travel from the ball on every device
+  const r = cssPx(26);                               // 52px across
+  const off = cssPx(68) + r;                         // 68px of clear gap
+  return {cx: ball.x, cy: Math.max(40 + r, ball.y - cam - off), r};
 }
 function cancelZone(){
   if(!mouse) return false;
   if(mouse.y < ball.y - 14) return true;             // dragged back above the ball
-  const b = cancelBar(), my = mouse.y - cam;         // or resting on the banner
-  return mouse.x > b.x && mouse.x < b.x+b.w && my > b.y && my < b.y+b.h;
+  const b = cancelBtn();                             // or sitting on the badge itself
+  return Math.hypot(mouse.x - b.cx, (mouse.y - cam) - b.cy) < b.r + 6;
 }
 function cancelShot(){
   if(!aiming) return;
@@ -1540,30 +1542,33 @@ function drawAim(){
       ctx.beginPath(); ctx.arc(px, py-cam, 2.2*a+0.8, 0, 7); ctx.fill();
     }
   }
-  // cancel banner, pinned near the top of the screen so a thumb never covers it
+  // cancel badge, above the ball and within one thumb's reach
   const armed = cancelZone();
-  const cb = cancelBar(), r2 = cb.h/2;
+  const cb = cancelBtn();
+  if(armed){                                   // halo, readable around a fingertip
+    ctx.fillStyle = 'rgba(226,58,42,.22)';
+    ctx.beginPath(); ctx.arc(cb.cx, cb.cy, cb.r*1.55, 0, 7); ctx.fill();
+  }
   ctx.fillStyle = armed ? 'rgba(226,58,42,.96)' : 'rgba(8,14,32,.72)';
+  ctx.beginPath(); ctx.arc(cb.cx, cb.cy, cb.r, 0, 7); ctx.fill();
+  ctx.strokeStyle = armed ? '#ffffff' : 'rgba(170,195,235,.6)';
+  ctx.lineWidth = armed ? 2.5 : 1.5; ctx.stroke();
+  const ks = cb.r*0.42;
+  ctx.lineWidth = Math.max(cb.r*0.16, 2.4); ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(cb.x+r2, cb.y); ctx.lineTo(cb.x+cb.w-r2, cb.y);
-  ctx.arc(cb.x+cb.w-r2, cb.y+r2, r2, -Math.PI/2, Math.PI/2);
-  ctx.lineTo(cb.x+r2, cb.y+cb.h);
-  ctx.arc(cb.x+r2, cb.y+r2, r2, Math.PI/2, -Math.PI/2);
-  ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = armed ? '#ffffff' : 'rgba(160,185,225,.55)';
-  ctx.lineWidth = armed ? 2 : 1.2; ctx.stroke();
-  const kx = cb.x + r2 + cssPx(4), ky = cb.y + r2, ks = Math.max(cssPx(7), 5);
-  ctx.lineWidth = Math.max(cssPx(3), 2.2); ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(kx-ks, ky-ks); ctx.lineTo(kx+ks, ky+ks);
-  ctx.moveTo(kx+ks, ky-ks); ctx.lineTo(kx-ks, ky+ks);
+  ctx.moveTo(cb.cx-ks, cb.cy-ks); ctx.lineTo(cb.cx+ks, cb.cy+ks);
+  ctx.moveTo(cb.cx+ks, cb.cy-ks); ctx.lineTo(cb.cx-ks, cb.cy+ks);
   ctx.stroke();
-  ctx.font = 'bold ' + Math.max(cssPx(12), 10).toFixed(1) + 'px ui-monospace,monospace';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = armed ? '#ffffff' : 'rgba(207,224,255,.8)';
-  ctx.fillText(armed ? 'RELEASE TO CANCEL' : 'DRAG UP HERE TO CANCEL',
-               cb.x + cb.w/2 + cssPx(8), ky);
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  // caption sits ABOVE the badge, so a finger on the badge cannot hide it
+  ctx.font = 'bold ' + Math.max(cssPx(11), 9).toFixed(1) + 'px ui-monospace,monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#000a';
+  ctx.fillText(armed ? 'RELEASE TO CANCEL' : 'DRAG UP TO CANCEL',
+               cb.cx+1, cb.cy - cb.r - cssPx(7) + 1);
+  ctx.fillStyle = armed ? '#ff6a56' : 'rgba(207,224,255,.85)';
+  ctx.fillText(armed ? 'RELEASE TO CANCEL' : 'DRAG UP TO CANCEL',
+               cb.cx, cb.cy - cb.r - cssPx(7));
+  ctx.textAlign = 'left';
   if(armed){                                   // and a marker at the ball itself
     ctx.strokeStyle = 'rgba(226,58,42,.9)'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(ball.x, ball.y-cam, R+9, 0, 7); ctx.stroke();
