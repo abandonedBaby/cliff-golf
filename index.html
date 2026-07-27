@@ -73,7 +73,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hint">drag DOWN from the ball to aim &amp; power up — release to launch · mouse wheel to peek · tap the spin icon under the ball · drag back up (or Esc) to cancel a shot · R = re-drop · mind the birds &amp; wind</div>
+<div id="hint">drag DOWN from the ball to aim &amp; power up — release to launch · mouse wheel to peek · tap the spin icon under the ball · drag back up to cancel a shot · R = re-drop · mind the birds &amp; wind</div>
 <div id="brand"><b>abandonedBaby GAMES</b> · © 2026</div>
 
 <div id="panel" role="dialog" aria-modal="true" aria-labelledby="pTitle">
@@ -487,16 +487,29 @@ function toScreen(e){
 function btnRect(){ return {x: VX0+VWF-40, y: 4, w: 34, h: 26}; }
 function boardRect(){ return {x: VX0+VWF-80, y: 4, w: 34, h: 26}; }
 
-// Spin control: a single button under the ball that opens a left/right × low/med/high
+// CSS pixels -> world units. Touch targets must be a fixed *physical* size, and the
+// canvas scale varies wildly between a phone and a desktop window, so all UI
+// furniture is sized through this rather than in raw world units.
+// NB: named cssPx, not px — drawAim already uses a local `px` for the trajectory,
+// which would shadow this helper inside that whole function.
+const cssPx = n => n/SCALE;
+
+// Spin control: a single button under the ball that opens a left/right × low/high
 // menu. Everything here is in screen space (world x, camera-relative y), which is
 // what toScreen gives us, so hit tests and drawing share the same coordinates.
-function spinBtn(){ return {cx: ball.x, cy: ball.y - cam + 40, r: 15}; }
+function spinBtn(){
+  // pushed clear of the ball's 42-unit aim radius at every scale, so a drag that
+  // starts near the ball is never stolen by the button
+  return {cx: ball.x, cy: ball.y - cam + Math.max(cssPx(58), 68), r: Math.max(cssPx(21), 14)};
+}
 function spinCells(){
-  const b = spinBtn(), cw = 40, ch = 34, gap = 5, clearW = 30;
+  const b = spinBtn();
+  const cw = Math.max(cssPx(54), 40), ch = Math.max(cssPx(46), 34);
+  const gap = Math.max(cssPx(7), 5), clearW = Math.max(cssPx(42), 30);
   const rowW = 2*cw + gap;
   const total = rowW + gap + clearW;
   const x0 = Math.max(VX0+6, Math.min(VX0+VWF-total-6, b.cx - total/2));
-  const y0 = b.cy + 17;
+  const y0 = b.cy + b.r + Math.max(cssPx(8), 6);
   const cells = [];
   for(let lvl=1; lvl<=2; lvl++){
     cells.push({x:x0+(lvl-1)*(cw+gap), y:y0,        w:cw, h:ch, val:-lvl});
@@ -550,7 +563,21 @@ function move(e){ if(aiming){ e.preventDefault(); mouse = toWorld(e); } }
 // A pulled-back shot is aimed by dragging DOWN, so dragging back up past the ball
 // is never a shot anyone wants — that gesture cancels instead. Esc and right-click
 // do the same for mouse players.
-function cancelZone(){ return mouse && mouse.y < ball.y - 14; }
+//
+// The affordance lives in a banner at the top of the screen, NOT next to the ball:
+// cancelling means dragging your finger up above the ball, which would sit directly
+// on top of anything drawn there. Releasing on the banner itself also cancels.
+function cancelBar(){
+  const w = Math.min(VWF-20, Math.max(cssPx(260), 210));
+  const h = Math.max(cssPx(46), 34);
+  return {x: VX0 + (VWF-w)/2, y: 40, w, h};
+}
+function cancelZone(){
+  if(!mouse) return false;
+  if(mouse.y < ball.y - 14) return true;             // dragged back above the ball
+  const b = cancelBar(), my = mouse.y - cam;         // or resting on the banner
+  return mouse.x > b.x && mouse.x < b.x+b.w && my > b.y && my < b.y+b.h;
+}
 function cancelShot(){
   if(!aiming) return;
   aiming = false; flash('SHOT CANCELLED');
@@ -1424,11 +1451,13 @@ function drawSpinUI(){
   ctx.beginPath(); ctx.arc(b.cx, b.cy, b.r, 0, 7); ctx.fill();
   ctx.strokeStyle = spinSel ? '#ffd23f' : 'rgba(207,224,255,.55)';
   ctx.lineWidth = 1.5; ctx.stroke();
-  spinGlyph(b.cx, b.cy - (spinSel?1.5:0), 4.6, spinSel < 0 ? -1 : 1, spinMenu);
+  const bg = b.r*0.42;
+  spinGlyph(b.cx, b.cy - (spinSel ? b.r*0.14 : 0), bg, spinSel < 0 ? -1 : 1, spinMenu);
   if(spinSel){                                   // level pips
     ctx.fillStyle = spinMenu ? '#12203f' : '#ffd23f';
-    const n = Math.abs(spinSel);
-    for(let i=0;i<n;i++) ctx.fillRect(b.cx - (n*5-2)/2 + i*5, b.cy+9, 3, 3);
+    const n = Math.abs(spinSel), s = b.r*0.30, gp = s*1.6;
+    for(let i=0;i<n;i++)
+      ctx.fillRect(b.cx - (n*gp-(gp-s))/2 + i*gp, b.cy + b.r*0.58, s, s);
   }
   // a hint of the loaded spin orbiting the ball itself
   if(spinSel && !spinMenu){
@@ -1454,6 +1483,8 @@ function drawSpinUI(){
   ctx.fillRect(box.x, box.y, box.w, box.h);
   ctx.strokeStyle = 'rgba(120,150,200,.5)'; ctx.lineWidth = 1;
   ctx.strokeRect(box.x, box.y, box.w, box.h);
+  const gr = Math.max(cells[0].h*0.20, 5);       // glyph radius follows the cell size
+  const pip = Math.max(cells[0].h*0.115, 3.5);
   for(const c of cells){
     const on = c.val === spinSel;
     ctx.fillStyle = on ? 'rgba(255,210,63,.92)' : 'rgba(40,58,100,.92)';
@@ -1461,21 +1492,24 @@ function drawSpinUI(){
     const mx = c.x+c.w/2, my = c.y+c.h/2;
     if(c.val === 0){                             // straight: plain ball, no ring
       ctx.fillStyle = on ? '#12203f' : '#ffffff';
-      ctx.beginPath(); ctx.arc(mx, my-3, 5, 0, 7); ctx.fill();
-      ctx.strokeStyle = on ? '#12203f' : '#cfe0ff'; ctx.lineWidth = 2; ctx.lineCap='round';
-      ctx.beginPath(); ctx.moveTo(mx, my+4); ctx.lineTo(mx, my+11); ctx.stroke();
+      ctx.beginPath(); ctx.arc(mx, my-gr*0.5, gr, 0, 7); ctx.fill();
+      ctx.strokeStyle = on ? '#12203f' : '#cfe0ff';
+      ctx.lineWidth = Math.max(gr*0.4, 2); ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(mx, my+gr); ctx.lineTo(mx, my+gr*2.4); ctx.stroke();
       continue;
     }
-    spinGlyph(mx, my-3, 5.4, Math.sign(c.val), on);
-    ctx.fillStyle = on ? '#12203f' : '#cfe0ff';  // level bars
-    const n = Math.abs(c.val);
-    for(let i=0;i<n;i++) ctx.fillRect(mx - (n*6-3)/2 + i*6, my+9, 4, 4);
+    spinGlyph(mx, my-gr*0.55, gr, Math.sign(c.val), on);
+    ctx.fillStyle = on ? '#12203f' : '#cfe0ff';  // level pips
+    const n = Math.abs(c.val), step = pip*1.6;
+    for(let i=0;i<n;i++)
+      ctx.fillRect(mx - (n*step-(step-pip))/2 + i*step, my + gr*1.75, pip, pip);
   }
-  ctx.fillStyle = 'rgba(207,224,255,.8)';
-  ctx.font = 'bold 9px ui-monospace,monospace'; ctx.textAlign = 'right';
-  ctx.fillText('L', cells[0].x-9, cells[0].y+21);
-  ctx.fillText('R', cells[1].x-9, cells[1].y+21);
-  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(207,224,255,.85)';
+  ctx.font = 'bold ' + Math.max(cssPx(11), 9).toFixed(1) + 'px ui-monospace,monospace';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.fillText('L', cells[0].x - Math.max(cssPx(6),5), cells[0].y + cells[0].h/2);
+  ctx.fillText('R', cells[1].x - Math.max(cssPx(6),5), cells[1].y + cells[1].h/2);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
 }
 
 let aimWind = 0;
@@ -1506,21 +1540,34 @@ function drawAim(){
       ctx.beginPath(); ctx.arc(px, py-cam, 2.2*a+0.8, 0, 7); ctx.fill();
     }
   }
-  // cancel target above the ball — drag back up here to call the shot off
+  // cancel banner, pinned near the top of the screen so a thumb never covers it
   const armed = cancelZone();
-  const kx = ball.x, ky = ball.y - cam - 48;
-  ctx.fillStyle = armed ? 'rgba(255,80,64,.95)' : 'rgba(8,14,32,.6)';
-  ctx.beginPath(); ctx.arc(kx, ky, 15, 0, 7); ctx.fill();
-  ctx.strokeStyle = armed ? '#ffffff' : 'rgba(207,224,255,.55)';
-  ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+  const cb = cancelBar(), r2 = cb.h/2;
+  ctx.fillStyle = armed ? 'rgba(226,58,42,.96)' : 'rgba(8,14,32,.72)';
   ctx.beginPath();
-  ctx.moveTo(kx-5, ky-5); ctx.lineTo(kx+5, ky+5);
-  ctx.moveTo(kx+5, ky-5); ctx.lineTo(kx-5, ky+5);
+  ctx.moveTo(cb.x+r2, cb.y); ctx.lineTo(cb.x+cb.w-r2, cb.y);
+  ctx.arc(cb.x+cb.w-r2, cb.y+r2, r2, -Math.PI/2, Math.PI/2);
+  ctx.lineTo(cb.x+r2, cb.y+cb.h);
+  ctx.arc(cb.x+r2, cb.y+r2, r2, Math.PI/2, -Math.PI/2);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = armed ? '#ffffff' : 'rgba(160,185,225,.55)';
+  ctx.lineWidth = armed ? 2 : 1.2; ctx.stroke();
+  const kx = cb.x + r2 + cssPx(4), ky = cb.y + r2, ks = Math.max(cssPx(7), 5);
+  ctx.lineWidth = Math.max(cssPx(3), 2.2); ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(kx-ks, ky-ks); ctx.lineTo(kx+ks, ky+ks);
+  ctx.moveTo(kx+ks, ky-ks); ctx.lineTo(kx-ks, ky+ks);
   ctx.stroke();
-  ctx.font = 'bold 9px ui-monospace,monospace'; ctx.textAlign = 'center';
-  ctx.fillStyle = armed ? '#ffd23f' : 'rgba(207,224,255,.7)';
-  ctx.fillText(armed ? 'RELEASE TO CANCEL' : 'DRAG UP TO CANCEL', kx, ky-21);
-  ctx.textAlign = 'left';
+  ctx.font = 'bold ' + Math.max(cssPx(12), 10).toFixed(1) + 'px ui-monospace,monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = armed ? '#ffffff' : 'rgba(207,224,255,.8)';
+  ctx.fillText(armed ? 'RELEASE TO CANCEL' : 'DRAG UP HERE TO CANCEL',
+               cb.x + cb.w/2 + cssPx(8), ky);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  if(armed){                                   // and a marker at the ball itself
+    ctx.strokeStyle = 'rgba(226,58,42,.9)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(ball.x, ball.y-cam, R+9, 0, 7); ctx.stroke();
+  }
 
   // power meter
   ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(VX0+14, VH-42, 160, 12);
@@ -1850,13 +1897,17 @@ requestAnimationFrame(loop);
 // out to both edges, so there are never bars.
 const MIN_VH = 620;                  // never show less world height than this
 function fit(){
-  const cw = window.innerWidth, ch = window.innerHeight;
+  // A zero or bogus viewport (hidden iframe, mid-startup layout) would give SCALE 0,
+  // and every cssPx()-derived size would become Infinity/NaN. Clamp at the source.
+  const cw = Math.max(1, window.innerWidth  || document.documentElement.clientWidth  || 480);
+  const ch = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 720);
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   cv.width  = Math.round(cw*dpr);
   cv.height = Math.round(ch*dpr);
 
   SCALE = cw/VW;                     // first choice: column spans the full width
   if(ch/SCALE < MIN_VH) SCALE = ch/MIN_VH;   // too wide — fit height instead
+  if(!isFinite(SCALE) || SCALE <= 0) SCALE = 1;
 
   VH  = ch/SCALE;
   VWF = cw/SCALE;
