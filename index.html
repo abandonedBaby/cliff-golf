@@ -73,7 +73,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hint">drag DOWN from the ball to aim &amp; power up — release to launch · mouse wheel to peek · R = reset shot · mind the birds &amp; wind</div>
+<div id="hint">drag DOWN from the ball to aim &amp; power up — release to launch · mouse wheel to peek · tap the spin icon under the ball · drag back up (or Esc) to cancel a shot · R = re-drop · mind the birds &amp; wind</div>
 <div id="brand"><b>abandonedBaby GAMES</b> · © 2026</div>
 
 <div id="panel" role="dialog" aria-modal="true" aria-labelledby="pTitle">
@@ -439,6 +439,10 @@ let ball, hole, strokes, total, cam, camPeek, aiming, aimFrom, mouse, done, msg,
 let restartArm = 0;                  // declared here: reset() runs before the input section
 let introT = 170;                    // studio card frames remaining on first load
 let panelUp = false, scoreSaved = false, lastRank = -1;   // same reason — reset() touches these
+// side spin: sign = direction, magnitude = level (1 low, 2 high), 0 = straight
+let spinSel = 0, spinMenu = false;
+const SPIN_ACC = [0, 0.05, 0.105];
+const SPIN_NAME = ['', 'LOW', 'HIGH'];
 // hoisted + no helpers, so reset() can call it safely during load
 function hidePanel(){
   const p = document.getElementById('panel');
@@ -456,8 +460,9 @@ function reset(){
   cam = ball.y - VH*0.65;
 }
 function respawn(x,y){
-  ball = {x, y, vx:0, vy:0, rest:true, sand:false, spin:0};
+  ball = {x, y, vx:0, vy:0, rest:true, sand:false, spin:0, curve:0};
   ball.homeX = x; ball.homeY = y;
+  spinMenu = false;
 }
 reset();
 
@@ -481,6 +486,45 @@ function toScreen(e){
 // misplaced touch can never wipe a run in progress.
 function btnRect(){ return {x: VX0+VWF-40, y: 4, w: 34, h: 26}; }
 function boardRect(){ return {x: VX0+VWF-80, y: 4, w: 34, h: 26}; }
+
+// Spin control: a single button under the ball that opens a left/right × low/med/high
+// menu. Everything here is in screen space (world x, camera-relative y), which is
+// what toScreen gives us, so hit tests and drawing share the same coordinates.
+function spinBtn(){ return {cx: ball.x, cy: ball.y - cam + 40, r: 15}; }
+function spinCells(){
+  const b = spinBtn(), cw = 40, ch = 34, gap = 5, clearW = 30;
+  const rowW = 2*cw + gap;
+  const total = rowW + gap + clearW;
+  const x0 = Math.max(VX0+6, Math.min(VX0+VWF-total-6, b.cx - total/2));
+  const y0 = b.cy + 17;
+  const cells = [];
+  for(let lvl=1; lvl<=2; lvl++){
+    cells.push({x:x0+(lvl-1)*(cw+gap), y:y0,        w:cw, h:ch, val:-lvl});
+    cells.push({x:x0+(lvl-1)*(cw+gap), y:y0+ch+gap, w:cw, h:ch, val: lvl});
+  }
+  cells.push({x:x0+rowW+gap, y:y0, w:clearW, h:ch*2+gap, val:0});   // straight / clear
+  return cells;
+}
+function spinUIVisible(){ return ball && ball.rest && !done && !panelUp; }
+// returns true if the tap was consumed by the spin control
+function spinTap(s){
+  if(!spinUIVisible()) return false;
+  const b = spinBtn();
+  // tight hit area: the button sits inside the ball's aim radius, so any slack here
+  // steals presses that were meant to start a drag
+  if(Math.hypot(s.x-b.cx, s.y-b.cy) < b.r+2){ spinMenu = !spinMenu; return true; }
+  if(spinMenu){
+    for(const c of spinCells()){
+      if(s.x>c.x && s.x<c.x+c.w && s.y>c.y && s.y<c.y+c.h){
+        spinSel = c.val; spinMenu = false;
+        flash(c.val ? (c.val<0?'LEFT':'RIGHT')+' SPIN '+SPIN_NAME[Math.abs(c.val)] : 'NO SPIN');
+        return true;
+      }
+    }
+    spinMenu = false;                    // tapped away — close, then handle normally
+  }
+  return false;
+}
 function hits(s, b){
   return s.x > b.x-6 && s.x < b.x+b.w+6 && s.y > b.y-4 && s.y < b.y+b.h+6;
 }
@@ -497,18 +541,29 @@ function down(e){
   }
   restartArm = 0;                                  // tapping elsewhere cancels
   if(done) return;                                 // end panel owns the finished state
+  if(spinTap(s)) return;                           // spin button / menu
   const m = toWorld(e);
   if(!atRest()) return;
   if(Math.hypot(m.x-ball.x, m.y-ball.y) < 42){ aiming = true; aimFrom = m; mouse = m; }
 }
 function move(e){ if(aiming){ e.preventDefault(); mouse = toWorld(e); } }
+// A pulled-back shot is aimed by dragging DOWN, so dragging back up past the ball
+// is never a shot anyone wants — that gesture cancels instead. Esc and right-click
+// do the same for mouse players.
+function cancelZone(){ return mouse && mouse.y < ball.y - 14; }
+function cancelShot(){
+  if(!aiming) return;
+  aiming = false; flash('SHOT CANCELLED');
+}
 function up(e){
   if(!aiming) return;
+  if(cancelZone()){ cancelShot(); return; }
   aiming = false;
   const v = pull();
   if(v.len < 12) return;
   ball.vx = -v.dx*POWER; ball.vy = -v.dy*POWER;
-  ball.rest = false; strokes++; total++; camPeek = 0;
+  ball.curve = Math.sign(spinSel) * SPIN_ACC[Math.abs(spinSel)];
+  ball.rest = false; strokes++; total++; camPeek = 0; spinMenu = false;
 }
 function pull(){
   let dx = mouse.x-ball.x, dy = mouse.y-ball.y;
@@ -522,7 +577,11 @@ window.addEventListener('mouseup',up); window.addEventListener('touchend',up);
 cv.addEventListener('wheel',e=>{ e.preventDefault(); camPeek += e.deltaY*0.6;
   camPeek = Math.max(-1200, Math.min(600, camPeek)); },{passive:false});
 window.addEventListener('keydown',e=>{
+  if(e.key==='Escape' && aiming){ cancelShot(); return; }
   if(e.key==='r'||e.key==='R'){ respawn(ball.homeX, ball.homeY); strokes++; total++; }
+});
+cv.addEventListener('contextmenu',e=>{           // right-click also cancels
+  if(aiming){ e.preventDefault(); cancelShot(); }
 });
 
 function atRest(){ return ball.rest; }
@@ -535,6 +594,8 @@ function step(){
 
   ball.vy += GRAV;
   ball.vx += windAt(ball.x, ball.y);
+  ball.vx += ball.curve;                 // side spin bends the flight
+  ball.curve *= 0.985;                   // and bleeds off as the ball travels
   ball.vx *= AIRDRAG; ball.vy *= AIRDRAG;
 
   // substep for tunnelling
@@ -547,7 +608,8 @@ function step(){
     if(done || ball.rest) return;
   }
   edgeGrip();
-  ball.spin += ball.vx*0.06;
+  if(onGround()) ball.curve *= 0.90;     // scrubs off fast once it's rolling
+  ball.spin += ball.vx*0.06 + ball.curve*2.2;
 
   // settle — the slow-frame counter is a backstop so a ball nudging along a slope
   // or wedged in a basin can never leave the player unable to take a shot
@@ -1321,6 +1383,101 @@ function drawBall(){
   }
 }
 
+// A golf ball wrapped in a circular arrow — the arrowhead sits at the top of the
+// ring and points the way the ball will bend. Used on the button and in the menu.
+function spinGlyph(cx, cy, r, dir, dark, alpha){
+  ctx.save();
+  if(alpha != null) ctx.globalAlpha = alpha;
+  ctx.fillStyle = dark ? '#12203f' : '#ffffff';       // the ball
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,.35)' : '#b9c4d8';
+  ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = dark ? 'rgba(255,255,255,.4)' : '#c3ccdd';   // dimples
+  for(let i=0;i<3;i++){
+    const a = i*2.1 + 0.6;
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(a)*r*0.42, cy + Math.sin(a)*r*0.42, Math.max(0.9, r*0.16), 0, 7);
+    ctx.fill();
+  }
+  const ring = r + Math.max(4, r*0.55);               // the circular arrow
+  ctx.strokeStyle = dark ? '#12203f' : '#ffd23f';
+  ctx.lineWidth = Math.max(1.6, r*0.34); ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, cy, ring, -Math.PI/2 + 0.45, -Math.PI/2 - 0.45 + Math.PI*2);
+  ctx.stroke();
+  ctx.save();                                        // arrowhead at the top
+  ctx.translate(cx, cy - ring);
+  ctx.rotate(dir < 0 ? Math.PI : 0);
+  const hs = Math.max(2.6, r*0.55);
+  ctx.beginPath();
+  ctx.moveTo(-hs*0.7, -hs); ctx.lineTo(hs*0.9, 0); ctx.lineTo(-hs*0.7, hs);
+  ctx.closePath();
+  ctx.fillStyle = dark ? '#12203f' : '#ffd23f'; ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+function drawSpinUI(){
+  if(!spinUIVisible()) return;
+  const b = spinBtn();
+  ctx.fillStyle = spinMenu ? 'rgba(255,210,63,.92)' : 'rgba(8,14,32,.72)';
+  ctx.beginPath(); ctx.arc(b.cx, b.cy, b.r, 0, 7); ctx.fill();
+  ctx.strokeStyle = spinSel ? '#ffd23f' : 'rgba(207,224,255,.55)';
+  ctx.lineWidth = 1.5; ctx.stroke();
+  spinGlyph(b.cx, b.cy - (spinSel?1.5:0), 4.6, spinSel < 0 ? -1 : 1, spinMenu);
+  if(spinSel){                                   // level pips
+    ctx.fillStyle = spinMenu ? '#12203f' : '#ffd23f';
+    const n = Math.abs(spinSel);
+    for(let i=0;i<n;i++) ctx.fillRect(b.cx - (n*5-2)/2 + i*5, b.cy+9, 3, 3);
+  }
+  // a hint of the loaded spin orbiting the ball itself
+  if(spinSel && !spinMenu){
+    ctx.save(); ctx.globalAlpha = 0.3 + 0.18*Math.sin(perf/300);
+    ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y-cam, R+7, -Math.PI/2 + 0.5, -Math.PI/2 - 0.5 + Math.PI*2);
+    ctx.stroke();
+    ctx.save();
+    ctx.translate(ball.x, ball.y-cam-(R+7));
+    ctx.rotate(spinSel < 0 ? Math.PI : 0);
+    ctx.beginPath(); ctx.moveTo(-3,-4); ctx.lineTo(4,0); ctx.lineTo(-3,4);
+    ctx.closePath(); ctx.fillStyle = '#ffd23f'; ctx.fill();
+    ctx.restore(); ctx.restore();
+  }
+
+  if(!spinMenu) return;
+  const cells = spinCells();
+  const last = cells[cells.length-1];
+  const box = {x:cells[0].x-7, y:cells[0].y-7,
+               w:(last.x+last.w)-cells[0].x+14, h:(cells[3].y+cells[3].h)-cells[0].y+14};
+  ctx.fillStyle = 'rgba(8,14,32,.88)';
+  ctx.fillRect(box.x, box.y, box.w, box.h);
+  ctx.strokeStyle = 'rgba(120,150,200,.5)'; ctx.lineWidth = 1;
+  ctx.strokeRect(box.x, box.y, box.w, box.h);
+  for(const c of cells){
+    const on = c.val === spinSel;
+    ctx.fillStyle = on ? 'rgba(255,210,63,.92)' : 'rgba(40,58,100,.92)';
+    ctx.fillRect(c.x, c.y, c.w, c.h);
+    const mx = c.x+c.w/2, my = c.y+c.h/2;
+    if(c.val === 0){                             // straight: plain ball, no ring
+      ctx.fillStyle = on ? '#12203f' : '#ffffff';
+      ctx.beginPath(); ctx.arc(mx, my-3, 5, 0, 7); ctx.fill();
+      ctx.strokeStyle = on ? '#12203f' : '#cfe0ff'; ctx.lineWidth = 2; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(mx, my+4); ctx.lineTo(mx, my+11); ctx.stroke();
+      continue;
+    }
+    spinGlyph(mx, my-3, 5.4, Math.sign(c.val), on);
+    ctx.fillStyle = on ? '#12203f' : '#cfe0ff';  // level bars
+    const n = Math.abs(c.val);
+    for(let i=0;i<n;i++) ctx.fillRect(mx - (n*6-3)/2 + i*6, my+9, 4, 4);
+  }
+  ctx.fillStyle = 'rgba(207,224,255,.8)';
+  ctx.font = 'bold 9px ui-monospace,monospace'; ctx.textAlign = 'right';
+  ctx.fillText('L', cells[0].x-9, cells[0].y+21);
+  ctx.fillText('R', cells[1].x-9, cells[1].y+21);
+  ctx.textAlign = 'left';
+}
+
 let aimWind = 0;
 function drawAim(){
   if(!aiming){ aimWind = 0; return; }
@@ -1332,13 +1489,16 @@ function drawAim(){
   ctx.beginPath(); ctx.moveTo(ball.x, ball.y-cam);
   ctx.lineTo(ball.x+v.dx, ball.y+v.dy-cam); ctx.stroke();
   ctx.setLineDash([]);
-  // predicted arc
+  // predicted arc — suppressed while the cancel target is armed, since releasing
+  // there fires nothing and showing a trajectory would be a lie
   let px = ball.x, py = ball.y, pvx = -v.dx*POWER, pvy = -v.dy*POWER;
   aimWind = 0;
-  for(let i=0;i<95;i++){
+  let pcurve = Math.sign(spinSel) * SPIN_ACC[Math.abs(spinSel)];
+  for(let i=0;i<95 && !cancelZone();i++){
     const wnd = windAt(px,py);                   // strongest wind along this line
     if(Math.abs(wnd) > Math.abs(aimWind)) aimWind = wnd;
-    pvy += GRAV; pvx += wnd; pvx *= AIRDRAG; pvy *= AIRDRAG;
+    pvy += GRAV; pvx += wnd + pcurve; pcurve *= 0.985;
+    pvx *= AIRDRAG; pvy *= AIRDRAG;
     px += pvx; py += pvy;
     if(i%4===0){
       const a = (1-i/95);
@@ -1346,9 +1506,26 @@ function drawAim(){
       ctx.beginPath(); ctx.arc(px, py-cam, 2.2*a+0.8, 0, 7); ctx.fill();
     }
   }
+  // cancel target above the ball — drag back up here to call the shot off
+  const armed = cancelZone();
+  const kx = ball.x, ky = ball.y - cam - 48;
+  ctx.fillStyle = armed ? 'rgba(255,80,64,.95)' : 'rgba(8,14,32,.6)';
+  ctx.beginPath(); ctx.arc(kx, ky, 15, 0, 7); ctx.fill();
+  ctx.strokeStyle = armed ? '#ffffff' : 'rgba(207,224,255,.55)';
+  ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(kx-5, ky-5); ctx.lineTo(kx+5, ky+5);
+  ctx.moveTo(kx+5, ky-5); ctx.lineTo(kx-5, ky+5);
+  ctx.stroke();
+  ctx.font = 'bold 9px ui-monospace,monospace'; ctx.textAlign = 'center';
+  ctx.fillStyle = armed ? '#ffd23f' : 'rgba(207,224,255,.7)';
+  ctx.fillText(armed ? 'RELEASE TO CANCEL' : 'DRAG UP TO CANCEL', kx, ky-21);
+  ctx.textAlign = 'left';
+
   // power meter
   ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(VX0+14, VH-42, 160, 12);
-  ctx.fillStyle = p>0.85 ? '#ff5b4a' : p>0.5 ? '#ffd23f' : '#66e06a';
+  ctx.fillStyle = armed ? 'rgba(90,100,120,.6)'
+                : p>0.85 ? '#ff5b4a' : p>0.5 ? '#ffd23f' : '#66e06a';
   ctx.fillRect(VX0+16, VH-40, 156*p, 8);
 }
 
@@ -1656,7 +1833,7 @@ function drawFrame(){
   for(let i=0;i<HOLES.length;i++){
     if(i===hole || (i>hole && i<hole+3)) drawFlag(HOLES[i], i===hole);
   }
-  drawBirds(); drawBall(); drawAim(); drawSnowfall(); vignette();
+  drawBirds(); drawBall(); drawSpinUI(); drawAim(); drawSnowfall(); vignette();
 }
 function loop(t){
   perf = t||0;
